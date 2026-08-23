@@ -192,23 +192,17 @@ runtime minimum remains Quickshell 0.3.1. `slurp` and
 selection and direct mock use do not require them. The package's `check()` runs
 the complete headless suite, including the real-QML offscreen smoke.
 
-Before the first AUR publication:
+The v0.1.0 recipe is pinned to the published release asset and its SHA-256.
+Validate future release updates with:
 
-1. Create the archive with `SOURCE_DATE_EPOCH=<tag-epoch> make dist`.
-2. Upload that exact `.tar.gz` as the v0.1.0 release asset.
-3. Replace the all-zero fail-closed checksum with:
+```sh
+updpkgsums aur/PKGBUILD
+(cd aur && makepkg --printsrcinfo > .SRCINFO)
+(cd aur && makepkg -si)
+```
 
-   ```sh
-   updpkgsums aur/PKGBUILD
-   (cd aur && makepkg --printsrcinfo > .SRCINFO)
-   ```
-
-4. Review both files, then test with `(cd aur && makepkg -si)`.
-
-The zero checksum is intentional: it prevents accidentally publishing an AUR
-recipe that skips or guesses release integrity. A `-git` PKGBUILD is not
-included because this small release-oriented project gains no concrete benefit
-from one.
+A `-git` PKGBUILD is not included because this small release-oriented project
+gains no concrete benefit from one.
 
 ## Development
 

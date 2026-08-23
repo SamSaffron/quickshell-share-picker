@@ -16,9 +16,7 @@ optdepends=(
   'xdg-desktop-portal-hyprland: portal integration'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
-# Fail-closed first-release placeholder. After producing/uploading the v0.1.0
-# release asset, run `updpkgsums aur/PKGBUILD` and regenerate .SRCINFO.
-sha256sums=('0000000000000000000000000000000000000000000000000000000000000000')
+sha256sums=('01085f8662510c9a8a82ecaf203b1e234d45a8149c72cd754ac810dc3cc2c47b')
 
 check() {
   cd "$srcdir/$pkgname-$pkgver"
