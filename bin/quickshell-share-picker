@@ -75,7 +75,9 @@ command -v "$qs_bin" >/dev/null 2>&1 || fail "qs is required (install Quickshell
 command -v timeout >/dev/null 2>&1 || fail "timeout is required (install GNU coreutils)"
 
 runtime_base=${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}
-[ -d "$runtime_base" ] && [ -w "$runtime_base" ] || fail "runtime directory is not writable: $runtime_base"
+if [ ! -d "$runtime_base" ] || [ ! -w "$runtime_base" ]; then
+    fail "runtime directory is not writable: $runtime_base"
+fi
 runtime_dir=$(mktemp -d "$runtime_base/$PROGRAM.XXXXXXXX") || fail "cannot create a private runtime directory"
 chmod 700 "$runtime_dir" || fail "cannot secure runtime directory"
 if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
@@ -87,7 +89,7 @@ fi
 
 child_pid=
 # Invoked indirectly by trap.
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 cleanup() {
     if [ -n "$child_pid" ]; then
         kill -TERM "$child_pid" 2>/dev/null || true
