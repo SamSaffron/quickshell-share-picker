@@ -29,9 +29,12 @@ jobs:
         run: |
           SOURCE_DATE_EPOCH=0 make dist
           first=$(sha256sum dist/*.tar.gz)
+          touch aur/ignored-build-artifact.tar.gz
           SOURCE_DATE_EPOCH=0 make dist
           second=$(sha256sum dist/*.tar.gz)
+          rm aur/ignored-build-artifact.tar.gz
           test "$first" = "$second"
+          ! tar -tzf dist/*.tar.gz | grep -E '\.(tar\.gz|pkg\.tar\.)$'
 
   qml-runtime:
     runs-on: ubuntu-24.04

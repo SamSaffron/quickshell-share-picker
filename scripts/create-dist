@@ -35,6 +35,10 @@ rm -f "$output"
             tests \
             -type f \
             ! -path '*/__pycache__/*' \
+            ! -path 'aur/src/*' \
+            ! -path 'aur/pkg/*' \
+            ! -name '*.tar.gz' \
+            ! -name '*.pkg.tar.*' \
             -print0
         for file in \
             .editorconfig .gitignore .qsp-source-root CHANGELOG.md CONTRIBUTING.md LICENSE Makefile \

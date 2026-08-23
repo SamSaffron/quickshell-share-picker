@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-24
+
+### Fixed
+
+- Release archives now exclude local AUR source/package artifacts, with a CI
+  regression check that injects an ignored archive before rebuilding.
+
 ## [0.1.1] - 2026-08-24
 
 ### Fixed
@@ -32,6 +39,7 @@ All notable changes to this project are documented here. The format follows
   deterministic release archives, and an Arch release-package template.
 - XDPH/BSD attribution and implementation notes for selected-window previews.
 
-[Unreleased]: https://github.com/sam-saffron-jarvis/quickshell-share-picker/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/sam-saffron-jarvis/quickshell-share-picker/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/sam-saffron-jarvis/quickshell-share-picker/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/sam-saffron-jarvis/quickshell-share-picker/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/sam-saffron-jarvis/quickshell-share-picker/releases/tag/v0.1.0
