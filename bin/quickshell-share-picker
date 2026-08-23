@@ -1,0 +1,201 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+
+set -eu
+
+PROGRAM=quickshell-share-picker
+DEFAULT_TIMEOUT=120
+
+usage() {
+    cat <<'EOF'
+Usage: quickshell-share-picker [--allow-token] [--test]
+
+One-shot screencast source picker for xdg-desktop-portal-hyprland.
+
+  --allow-token  Accepted for XDPH compatibility (restore tokens already default on).
+  --test         Use the bundled mock session (no Hyprland data required).
+  -h, --help     Show this help.
+EOF
+}
+
+fail() {
+    printf '%s: %s\n' "$PROGRAM" "$*" >&2
+    exit 1
+}
+
+allow_token=1
+test_mode=0
+while [ "$#" -gt 0 ]; do
+    case $1 in
+        --allow-token)
+            allow_token=1
+            ;;
+        --test)
+            test_mode=1
+            ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        *)
+            fail "unknown option: $1"
+            ;;
+    esac
+    shift
+done
+
+umask 077
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+if [ -n "${QSP_SHARE_DIR:-}" ]; then
+    share_dir=$QSP_SHARE_DIR
+elif [ -f "$script_dir/../.qsp-source-root" ] && \
+    [ -f "$script_dir/../src/quickshell/shell.qml" ] && \
+    [ -f "$script_dir/../src/lib/protocol.py" ]; then
+    # Source-tree execution.
+    share_dir=$(CDPATH='' cd -- "$script_dir/../src" && pwd -P)
+else
+    share_dir=${QSP_SYSTEM_SHARE_DIR:-/usr/share/quickshell-share-picker}
+fi
+
+config_path=$share_dir/quickshell/shell.qml
+protocol_helper=$share_dir/lib/protocol.py
+fixture_path=${QSP_TEST_FIXTURE:-$share_dir/fixtures/mock-session.json}
+
+[ -r "$config_path" ] || fail "cannot read Quickshell config: $config_path"
+[ -r "$protocol_helper" ] || fail "cannot read protocol helper: $protocol_helper"
+if [ "$test_mode" -eq 1 ]; then
+    [ -r "$fixture_path" ] || fail "cannot read mock fixture: $fixture_path"
+fi
+
+python_bin=${QSP_PYTHON_BIN:-python3}
+qs_bin=${QSP_QS_BIN:-qs}
+command -v "$python_bin" >/dev/null 2>&1 || fail "python3 is required"
+command -v "$qs_bin" >/dev/null 2>&1 || fail "qs is required (install Quickshell)"
+command -v timeout >/dev/null 2>&1 || fail "timeout is required (install GNU coreutils)"
+
+runtime_base=${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}
+[ -d "$runtime_base" ] && [ -w "$runtime_base" ] || fail "runtime directory is not writable: $runtime_base"
+runtime_dir=$(mktemp -d "$runtime_base/$PROGRAM.XXXXXXXX") || fail "cannot create a private runtime directory"
+chmod 700 "$runtime_dir" || fail "cannot secure runtime directory"
+if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+    # Quickshell itself requires an XDG runtime directory. A private ephemeral
+    # directory is a safe fallback when a service environment omitted one.
+    XDG_RUNTIME_DIR=$runtime_dir
+    export XDG_RUNTIME_DIR
+fi
+
+child_pid=
+# Invoked indirectly by trap.
+# shellcheck disable=SC2329
+cleanup() {
+    if [ -n "$child_pid" ]; then
+        kill -TERM "$child_pid" 2>/dev/null || true
+        wait "$child_pid" 2>/dev/null || true
+    fi
+    rm -rf -- "$runtime_dir"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+session_file=$runtime_dir/session.json
+result_file=$runtime_dir/result
+log_file=$runtime_dir/quickshell.log
+
+if [ "$test_mode" -eq 1 ]; then
+    "$python_bin" "$protocol_helper" prepare --output "$session_file" --fixture "$fixture_path" || \
+        fail "failed to prepare the mock session"
+else
+    "$python_bin" "$protocol_helper" prepare --output "$session_file" || \
+        fail "failed to parse XDPH_WINDOW_SHARING_LIST"
+fi
+
+state_dir=${QSP_STATE_DIR:-}
+if [ -z "$state_dir" ]; then
+    if [ -n "${XDG_STATE_HOME:-}" ]; then
+        state_dir=$XDG_STATE_HOME/$PROGRAM
+    elif [ -n "${HOME:-}" ]; then
+        state_dir=$HOME/.local/state/$PROGRAM
+    else
+        state_dir=$runtime_dir/state
+    fi
+fi
+if [ -e "$state_dir" ]; then
+    [ -d "$state_dir" ] || fail "state path is not a directory: $state_dir"
+else
+    mkdir -p -- "$state_dir" || fail "cannot create state directory: $state_dir"
+    chmod 700 "$state_dir" || fail "cannot secure state directory: $state_dir"
+fi
+[ -w "$state_dir" ] || fail "state directory is not writable: $state_dir"
+geometry_file=$state_dir/geometry.json
+
+case ${QSP_TIMEOUT_SECONDS:-$DEFAULT_TIMEOUT} in
+    '' | *[!0-9]*) fail "QSP_TIMEOUT_SECONDS must be an integer from 5 to 600" ;;
+    *) timeout_seconds=${QSP_TIMEOUT_SECONDS:-$DEFAULT_TIMEOUT} ;;
+esac
+if [ "$timeout_seconds" -lt 5 ] || [ "$timeout_seconds" -gt 600 ]; then
+    fail "QSP_TIMEOUT_SECONDS must be an integer from 5 to 600"
+fi
+
+if command -v slurp >/dev/null 2>&1; then
+    slurp_available=1
+else
+    slurp_available=0
+fi
+
+if [ "${XDPH_PICKER_ALLOW_TOKEN_SELECTION+x}" = x ]; then
+    allow_token_selection=1
+else
+    allow_token_selection=0
+fi
+
+export QSP_SESSION_FILE="$session_file"
+export QSP_RESULT_FILE="$result_file"
+export QSP_GEOMETRY_FILE="$geometry_file"
+export QSP_ALLOW_TOKEN=$allow_token
+export QSP_ALLOW_TOKEN_SELECTION=$allow_token_selection
+export QSP_TEST_MODE=$test_mode
+export QSP_SLURP_AVAILABLE=$slurp_available
+export QS_NO_RELOAD_POPUP=1
+
+# Quickshell's output is diagnostic, never picker protocol. Keep it away from
+# stdout and only replay a short tail to stderr if startup/runtime fails. GNU
+# timeout owns and bounds the complete qs process lifetime.
+timeout --signal=TERM --kill-after=2s "${timeout_seconds}s" \
+    "$qs_bin" --path "$config_path" --no-color >"$log_file" 2>&1 &
+child_pid=$!
+
+qs_status=0
+if wait "$child_pid"; then
+    qs_status=0
+else
+    qs_status=$?
+fi
+child_pid=
+
+if [ -f "$result_file" ]; then
+    # The helper emits the already-validated line. Command substitution would
+    # strip its newline, so validate to a second private file and cat it.
+    validated_file=$runtime_dir/validated
+    if "$python_bin" "$protocol_helper" validate --file "$result_file" >"$validated_file"; then
+        cat -- "$validated_file"
+        exit 0
+    fi
+    fail "the picker produced an invalid selection"
+fi
+
+# Cancellation intentionally emits nothing. A timeout or abnormal qs exit gets
+# a concise stderr diagnostic while preserving an empty stdout stream.
+if [ "$qs_status" -eq 124 ]; then
+    printf '%s: picker timed out after %s seconds\n' "$PROGRAM" "$timeout_seconds" >&2
+    tail -n 20 "$log_file" >&2 2>/dev/null || true
+    exit 124
+fi
+if [ "$qs_status" -ne 0 ]; then
+    printf '%s: Quickshell exited with status %s\n' "$PROGRAM" "$qs_status" >&2
+    tail -n 20 "$log_file" >&2 2>/dev/null || true
+    exit "$qs_status"
+fi
+exit 1

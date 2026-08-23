@@ -1,0 +1,19 @@
+{
+  "valid": [
+    "[SELECTION]/window:17\n",
+    "[SELECTION]r/window:4294967295\n",
+    "[SELECTION]/screen:DP-1\n",
+    "[SELECTION]r/region:HDMI-A-1@0,24,1920,1056\n"
+  ],
+  "invalid": [
+    "",
+    "log line\n[SELECTION]/screen:DP-1\n",
+    "[SELECTION]/window:-1\n",
+    "[SELECTION]/window:4294967296\n",
+    "[SELECTION]rr/screen:DP-1\n",
+    "[SELECTION]/region:DP-1@0,0,0,10\n",
+    "[SELECTION]/region:DP-1@-1,0,10,10\n",
+    "[SELECTION]/screen:DP-1\nextra\n",
+    "[SELECTION]/screen:DP-1"
+  ]
+}

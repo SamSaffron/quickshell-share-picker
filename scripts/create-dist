@@ -1,0 +1,60 @@
+#!/bin/sh
+
+set -eu
+
+export LC_ALL=C
+
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
+version=$(cat "$root/VERSION")
+name=quickshell-share-picker-$version
+output_dir=$root/dist
+output=$output_dir/$name.tar.gz
+epoch=${SOURCE_DATE_EPOCH:-0}
+
+case $epoch in
+    '' | *[!0-9]*)
+        printf 'SOURCE_DATE_EPOCH must be a non-negative integer\n' >&2
+        exit 2
+        ;;
+esac
+
+mkdir -p "$output_dir"
+rm -f "$output"
+
+# GNU tar options make identical trees produce identical release archives.
+# Keep the source list explicit enough to exclude VCS/build state.
+(
+    cd "$root"
+    {
+        find \
+            .github \
+            aur \
+            bin \
+            scripts \
+            src \
+            tests \
+            -type f \
+            ! -path '*/__pycache__/*' \
+            -print0
+        for file in \
+            .editorconfig .gitignore .qsp-source-root CHANGELOG.md CONTRIBUTING.md LICENSE Makefile \
+            NOTICE README.md SECURITY.md VERSION; do
+            printf '%s\0' "$file"
+        done
+    } | sort -z >"$output_dir/.dist-files"
+)
+
+TZ=UTC tar \
+    --directory="$root" \
+    --null \
+    --files-from="$output_dir/.dist-files" \
+    --sort=name \
+    --mtime="@$epoch" \
+    --owner=0 \
+    --group=0 \
+    --numeric-owner \
+    --pax-option=delete=atime,delete=ctime \
+    --transform="s,^,$name/," \
+    -czf "$output"
+rm -f "$output_dir/.dist-files"
+printf '%s\n' "$output"

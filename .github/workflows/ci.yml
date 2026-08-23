@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install --yes shellcheck
+      - name: Check formatting
+        run: make format-check
+      - name: Lint shell
+        run: make lint-shell REQUIRE_SHELLCHECK=1
+      - name: Run headless tests
+        run: make test
+      - name: Verify installation layout
+        run: make install DESTDIR="$RUNNER_TEMP/package-root"
+      - name: Build deterministic archive twice
+        run: |
+          SOURCE_DATE_EPOCH=0 make dist
+          first=$(sha256sum dist/*.tar.gz)
+          SOURCE_DATE_EPOCH=0 make dist
+          second=$(sha256sum dist/*.tar.gz)
+          test "$first" = "$second"
+
+  qml-runtime:
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - name: Install Git, Quickshell, and QML tools
+        run: pacman -Syu --noconfirm git make python quickshell qt6-declarative
+      - uses: actions/checkout@v4
+      - name: Lint QML with fatal warnings
+        run: make lint-qml REQUIRE_QMLLINT=1
+      - name: Run real QML offscreen smoke
+        run: make smoke REQUIRE_QS=1

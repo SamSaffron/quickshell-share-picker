@@ -1,0 +1,42 @@
+#!/bin/sh
+
+set -eu
+
+# Deliberately noisy: the real wrapper must prevent all qs output from reaching
+# its stdout selection channel.
+printf 'fake qs stdout noise\n'
+printf 'fake qs stderr noise\n' >&2
+
+case ${QSP_FAKE_MODE:-success} in
+    success)
+        printf '%s\n' "${QSP_FAKE_SELECTION:-[SELECTION]/window:17}" >"$QSP_RESULT_FILE"
+        ;;
+    allow-token)
+        if [ "${QSP_ALLOW_TOKEN:-0}" = 1 ]; then
+            printf '%s\n' '[SELECTION]r/window:17' >"$QSP_RESULT_FILE"
+        else
+            printf '%s\n' '[SELECTION]/window:17' >"$QSP_RESULT_FILE"
+        fi
+        ;;
+    token-visibility)
+        if [ "${QSP_ALLOW_TOKEN_SELECTION:-0}" = 1 ]; then
+            printf '%s\n' '[SELECTION]r/window:18' >"$QSP_RESULT_FILE"
+        else
+            printf '%s\n' '[SELECTION]r/window:17' >"$QSP_RESULT_FILE"
+        fi
+        ;;
+    cancel)
+        ;;
+    malformed)
+        printf '%s\n' 'diagnostic that is not protocol' >"$QSP_RESULT_FILE"
+        ;;
+    wait)
+        sleep 30
+        ;;
+    failure)
+        exit 42
+        ;;
+    *)
+        exit 64
+        ;;
+esac

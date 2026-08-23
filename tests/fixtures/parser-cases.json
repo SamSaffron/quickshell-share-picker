@@ -1,0 +1,57 @@
+[
+  {
+    "name": "multiple windows and 64-bit addresses",
+    "raw": "17[HC>]firefox[HT>]Docs[HE>]11256099[HA>]4294967295[HC>]kitty[HT>]shell[HE>]18446744073709551614[HA>]",
+    "expected": [
+      {
+        "address": "11256099",
+        "class": "firefox",
+        "handle": "17",
+        "normalizedAddress": "abc123",
+        "sourceIndex": 0,
+        "title": "Docs"
+      },
+      {
+        "address": "18446744073709551614",
+        "class": "kitty",
+        "handle": "4294967295",
+        "normalizedAddress": "fffffffffffffffe",
+        "sourceIndex": 1,
+        "title": "shell"
+      }
+    ]
+  },
+  {
+    "name": "malformed records are skipped",
+    "raw": "not-a-handle[HC>]bad[HT>]Bad[HE>]12[HA>]20[HC>]good.app[HT>]Good title[HE>]255[HA>]21[HC>]missing address[HT>]tail[HA>]",
+    "expected": [
+      {
+        "address": "255",
+        "class": "good.app",
+        "handle": "20",
+        "normalizedAddress": "ff",
+        "sourceIndex": 1,
+        "title": "Good title"
+      }
+    ]
+  },
+  {
+    "name": "empty and incomplete input",
+    "raw": "22[HC>]app[HT>]unfinished",
+    "expected": []
+  },
+  {
+    "name": "zero mappings remain selectable and oversized handles are rejected",
+    "raw": "23[HC>]app[HT>]zero address[HE>]0[HA>]4294967296[HC>]app[HT>]large handle[HE>]1[HA>]",
+    "expected": [
+      {
+        "address": "0",
+        "class": "app",
+        "handle": "23",
+        "normalizedAddress": "",
+        "sourceIndex": 0,
+        "title": "zero address"
+      }
+    ]
+  }
+]

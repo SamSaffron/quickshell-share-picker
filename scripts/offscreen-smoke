@@ -1,0 +1,87 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+
+set -eu
+
+PROGRAM=quickshell-share-picker-offscreen-smoke
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
+qs_bin=${QSP_QS_BIN:-qs}
+python_bin=${QSP_PYTHON_BIN:-python3}
+
+if ! command -v "$qs_bin" >/dev/null 2>&1; then
+    if [ "${REQUIRE_QS:-0}" = 1 ]; then
+        printf '%s: qs is required\n' "$PROGRAM" >&2
+        exit 1
+    fi
+    printf 'SKIP offscreen smoke (qs is unavailable; install Quickshell or use REQUIRE_QS=1)\n'
+    exit 0
+fi
+command -v "$python_bin" >/dev/null 2>&1 || {
+    printf '%s: python3 is required\n' "$PROGRAM" >&2
+    exit 1
+}
+command -v timeout >/dev/null 2>&1 || {
+    printf '%s: GNU timeout is required\n' "$PROGRAM" >&2
+    exit 1
+}
+
+temporary=$(mktemp -d "${TMPDIR:-/tmp}/$PROGRAM.XXXXXXXX")
+trap 'rm -rf -- "$temporary"' EXIT HUP INT TERM
+mkdir -m 700 "$temporary/runtime" "$temporary/state" "$temporary/data" "$temporary/cache"
+session_file=$temporary/session.json
+
+XDPH_WINDOW_SHARING_LIST='17[HC>]app[HT>]Title[HE>]255[HA>]' \
+    "$python_bin" "$root/src/lib/protocol.py" prepare --output "$session_file"
+
+run_case() {
+    name=$1
+    token_selection=$2
+    uncheck=$3
+    expected=$4
+    case_dir=$temporary/$name
+    mkdir -m 700 "$case_dir"
+    result_file=$case_dir/result
+    geometry_file=$case_dir/geometry.json
+    log_file=$case_dir/quickshell.log
+
+    if ! env \
+        QT_QPA_PLATFORM=offscreen \
+        QT_QUICK_BACKEND=software \
+        QS_DISABLE_FILE_WATCHER=1 \
+        QS_NO_RELOAD_POPUP=1 \
+        QSP_ALLOW_TOKEN=1 \
+        QSP_ALLOW_TOKEN_SELECTION="$token_selection" \
+        QSP_GEOMETRY_FILE="$geometry_file" \
+        QSP_RESULT_FILE="$result_file" \
+        QSP_SESSION_FILE="$session_file" \
+        QSP_SLURP_AVAILABLE=0 \
+        QSP_SMOKE_MODE=1 \
+        QSP_SMOKE_UNCHECK_TOKEN="$uncheck" \
+        QSP_TEST_MODE=0 \
+        XDG_CACHE_HOME="$temporary/cache" \
+        XDG_DATA_HOME="$temporary/data" \
+        XDG_RUNTIME_DIR="$temporary/runtime" \
+        XDG_STATE_HOME="$temporary/state" \
+        timeout --signal=TERM --kill-after=2s 10s \
+        "$qs_bin" --path "$root/src/quickshell/shell.qml" --no-color >"$log_file" 2>&1; then
+        printf '%s: %s case failed\n' "$PROGRAM" "$name" >&2
+        tail -n 40 "$log_file" >&2 || true
+        return 1
+    fi
+
+    if grep -E '(^|[^[:alpha:]])(TypeError|ReferenceError):' "$log_file" >/dev/null; then
+        printf '%s: fatal QML JavaScript error in %s case\n' "$PROGRAM" "$name" >&2
+        tail -n 40 "$log_file" >&2 || true
+        return 1
+    fi
+    if [ ! -f "$result_file" ] || [ "$(cat "$result_file")" != "$expected" ]; then
+        printf '%s: unexpected result in %s case\n' "$PROGRAM" "$name" >&2
+        tail -n 40 "$log_file" >&2 || true
+        return 1
+    fi
+}
+
+run_case hidden 0 0 '[SELECTION]r/window:17'
+run_case shown-checked 1 0 '[SELECTION]r/window:17'
+run_case shown-unchecked 1 1 '[SELECTION]/window:17'
+printf 'PASS real QML offscreen smoke\n'

@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+/dist/
+/aur/pkg/
+/aur/src/
+/aur/*.pkg.tar.*
+*.tar.gz
+
+.DS_Store
+*.swp
+*~

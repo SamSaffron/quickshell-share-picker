@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Apply or verify the repository's deterministic text formatting rules."""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+EXCLUDED_PARTS = {".git", ".pytest_cache", "__pycache__", "dist"}
+TEXT_SUFFIXES = {
+    ".editorconfig",
+    ".json",
+    ".md",
+    ".py",
+    ".qml",
+    ".sh",
+    ".srcinfo",
+    ".yaml",
+    ".yml",
+}
+TEXT_NAMES = {
+    ".gitignore",
+    ".qsp-source-root",
+    ".SRCINFO",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "Makefile",
+    "NOTICE",
+    "PKGBUILD",
+    "README.md",
+    "SECURITY.md",
+    "VERSION",
+}
+
+
+def files() -> list[Path]:
+    result = []
+    for path in ROOT.rglob("*"):
+        relative = path.relative_to(ROOT)
+        if not path.is_file() or any(part in EXCLUDED_PARTS for part in relative.parts):
+            continue
+        if path.name in TEXT_NAMES or path.suffix.lower() in TEXT_SUFFIXES:
+            result.append(path)
+    return sorted(result)
+
+
+def normalized(text: str, *, preserve_trailing_whitespace: bool = False) -> str:
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    if not preserve_trailing_whitespace:
+        lines = [line.rstrip() for line in lines]
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def validate_syntax(path: Path, text: str) -> list[str]:
+    errors: list[str] = []
+    try:
+        if path.suffix == ".json":
+            json.loads(text)
+        elif path.suffix == ".py":
+            ast.parse(text, filename=str(path))
+    except (json.JSONDecodeError, SyntaxError) as error:
+        errors.append(f"{path.relative_to(ROOT)}: {error}")
+    return errors
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--fix", action="store_true")
+    arguments = parser.parse_args()
+    errors: list[str] = []
+
+    for path in files():
+        try:
+            original = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as error:
+            errors.append(f"{path.relative_to(ROOT)}: not UTF-8: {error}")
+            continue
+        expected = normalized(
+            original, preserve_trailing_whitespace=path.suffix.lower() == ".md"
+        )
+        errors.extend(validate_syntax(path, expected))
+        if original != expected:
+            if arguments.fix:
+                path.write_text(expected, encoding="utf-8", newline="\n")
+            else:
+                errors.append(f"{path.relative_to(ROOT)}: run 'make format'")
+
+    if errors:
+        print("\n".join(errors), file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
