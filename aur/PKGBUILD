@@ -16,8 +16,7 @@ optdepends=(
   'xdg-desktop-portal-hyprland: portal integration'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
-# Fail closed until the v0.1.2 release asset is published and verified.
-sha256sums=('0000000000000000000000000000000000000000000000000000000000000000')
+sha256sums=('5fbe9989ebc1c332ef2d9bae8a117caa4c539458946bd238412d0b36416452e0')
 
 check() {
   cd "$srcdir/$pkgname-$pkgver"
