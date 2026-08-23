@@ -1,7 +1,7 @@
 # Maintainer: Sam Saffron
 
 pkgname=quickshell-share-picker
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="Quickshell screencast source picker for xdg-desktop-portal-hyprland"
 arch=('any')
@@ -16,7 +16,8 @@ optdepends=(
   'xdg-desktop-portal-hyprland: portal integration'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
-sha256sums=('01085f8662510c9a8a82ecaf203b1e234d45a8149c72cd754ac810dc3cc2c47b')
+# Fail closed until the v0.1.1 release asset is published and verified.
+sha256sums=('0000000000000000000000000000000000000000000000000000000000000000')
 
 check() {
   cd "$srcdir/$pkgname-$pkgver"

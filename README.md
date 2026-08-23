@@ -11,7 +11,7 @@ and keeps **Screen**, **Window**, and **Region** choices in one compact 800×500
 dialog. The restrained light palette is intentional and remains consistent
 across desktops rather than following a dark or system theme.
 
-The initial public release is **v0.1.0**.
+The current public release is **v0.1.1**.
 
 ## Features
 
@@ -192,7 +192,7 @@ runtime minimum remains Quickshell 0.3.1. `slurp` and
 selection and direct mock use do not require them. The package's `check()` runs
 the complete headless suite, including the real-QML offscreen smoke.
 
-The v0.1.0 recipe is pinned to the published release asset and its SHA-256.
+The v0.1.1 recipe is pinned to the published release asset and its SHA-256.
 Validate future release updates with:
 
 ```sh
