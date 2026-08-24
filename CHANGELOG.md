@@ -38,6 +38,8 @@ All notable changes to this project are documented here. The format follows
   and selection highlights never render underneath them.
 - Tabs now use larger 48-pixel hit targets with explicit hover and selected-fill
   states, without a heavy accent outline.
+- README Arch instructions now cover both the published PKGBUILD and building a
+  pacman-managed custom package from the current checkout.
 
 ### Fixed
 
@@ -46,6 +48,9 @@ All notable changes to this project are documented here. The format follows
 - Region selection now fully exits the focused layer-shell picker before the
   wrapper launches `slurp`, allowing `slurp` to acquire pointer and keyboard
   input reliably.
+- The Arch package check now explicitly invokes Qt 6's `qmllint` and declares
+  `qt6-declarative` as a check dependency, avoiding an incompatible Qt 5 tool on
+  `PATH`.
 
 ## [0.1.2] - 2026-08-24
 

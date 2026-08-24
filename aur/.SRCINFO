@@ -1,11 +1,12 @@
 pkgbase = quickshell-share-picker
 	pkgdesc = Quickshell screencast source picker for xdg-desktop-portal-hyprland
 	pkgver = 0.1.2
-	pkgrel = 1
+	pkgrel = 2
 	url = https://github.com/sam-saffron-jarvis/quickshell-share-picker
 	arch = any
 	license = MIT
 	checkdepends = shellcheck
+	checkdepends = qt6-declarative
 	depends = coreutils
 	depends = python
 	depends = quickshell

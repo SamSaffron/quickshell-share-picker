@@ -203,6 +203,61 @@ runtime minimum remains Quickshell 0.3.1. `slurp` and
 selection and direct mock use do not require them. The package's `check()` runs
 the complete headless suite, including the real-QML offscreen smoke.
 
+### Build and install the published Arch package
+
+The bundled recipe downloads the versioned release archive, builds a native Arch
+package, runs its checks, and installs it through pacman:
+
+```sh
+sudo pacman -S --needed base-devel
+cd aur
+makepkg -si
+```
+
+Run `makepkg` as your normal user, not as root. Its `-s` option asks pacman to
+install missing package dependencies, and `-i` installs the completed package.
+The package explicitly uses Qt 6's `/usr/lib/qt6/bin/qmllint`; this avoids the
+legacy Qt 5 `/usr/bin/qmllint`, which does not support the strict warning flags.
+The resulting `*.pkg.tar.zst` can later be removed normally with:
+
+```sh
+sudo pacman -Rns quickshell-share-picker
+```
+
+### Build and install a custom package from this checkout
+
+To package local modifications instead of the published release, first create the
+deterministic source archive, then build with a temporary copy of the PKGBUILD
+pointed at that local archive:
+
+```sh
+sudo pacman -S --needed base-devel shellcheck qt6-declarative
+
+make check
+make dist
+
+version=$(cat VERSION)
+archive="$PWD/dist/quickshell-share-picker-$version.tar.gz"
+build_dir=$(mktemp -d)
+cp aur/PKGBUILD "$build_dir/PKGBUILD"
+cp "$archive" "$build_dir/"
+checksum=$(sha256sum "$archive" | cut -d' ' -f1)
+
+sed -i \
+  -e 's|^pkgrel=.*|pkgrel=99|' \
+  -e 's|^source=.*|source=("$pkgname-$pkgver.tar.gz")|' \
+  -e "s|^sha256sums=.*|sha256sums=('$checksum')|" \
+  "$build_dir/PKGBUILD"
+
+(cd "$build_dir" && makepkg -si)
+rm -rf "$build_dir"
+```
+
+This leaves the repository's release-oriented `aur/PKGBUILD` unchanged. Pacman
+tracks the custom build as `quickshell-share-picker`, so later upgrades and
+removal use normal package-management commands. Do not commit the generated
+`dist/` archive or `*.pkg.tar.zst` package.
+
 The v0.1.2 recipe is pinned to the published release asset and its SHA-256.
 Validate future release updates with:
 
