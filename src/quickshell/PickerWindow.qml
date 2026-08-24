@@ -219,6 +219,13 @@ Item {
         windowList.currentIndex = selectedIndex;
     }
 
+    function moveWindowSelection(direction) {
+        if (direction > 0)
+            windowList.incrementCurrentIndex();
+        else if (direction < 0)
+            windowList.decrementCurrentIndex();
+    }
+
     function focusCurrentTab() {
         Qt.callLater(() => {
             if (tabs.currentIndex === 0)
@@ -510,6 +517,15 @@ Item {
             refreshFilteredWindows();
             if (filteredWindowEntries.length !== windowEntries.length)
                 throw new Error("clearing the window filter did not restore the model");
+            const previousIndex = windowList.currentIndex;
+            windowList.currentIndex = 0;
+            moveWindowSelection(1);
+            if (windowList.currentIndex !== Math.min(1, windowEntries.length - 1))
+                throw new Error("filter-field down navigation did not move selection");
+            moveWindowSelection(-1);
+            if (windowList.currentIndex !== 0)
+                throw new Error("filter-field up navigation did not move selection");
+            windowList.currentIndex = previousIndex;
             if (!windowEntries[0].sectionLabel)
                 throw new Error("window workspace section label is missing");
         }
@@ -1066,6 +1082,14 @@ Item {
                                                 onTextEdited: {
                                                     picker.windowFilterText = text;
                                                     picker.refreshFilteredWindows();
+                                                }
+                                                Keys.onDownPressed: event => {
+                                                    picker.moveWindowSelection(1);
+                                                    event.accepted = true;
+                                                }
+                                                Keys.onUpPressed: event => {
+                                                    picker.moveWindowSelection(-1);
+                                                    event.accepted = true;
                                                 }
                                                 Keys.onEscapePressed: event => {
                                                     if (text.length > 0) {

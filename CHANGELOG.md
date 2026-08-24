@@ -53,6 +53,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Up and Down now move the selected window while the slash-activated filter
+  field keeps keyboard focus, so filtering and list navigation work together.
 - QML lint discovery now prefers Qt 6's `qmllint` when a legacy Qt 5 tool also
   appears on `PATH`.
 - Region selection now fully exits the focused layer-shell picker before the
