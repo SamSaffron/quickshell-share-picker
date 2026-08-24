@@ -8,8 +8,8 @@ The project follows the practical interaction model of Sam Saffron's
 `better-picker` branch: it opens on the **Window** tab, places the window list
 beside a selected-window preview, shows workspace labels and application icons,
 and keeps **Screen**, **Window**, and **Region** choices in one compact 800×500
-centered layer-shell surface. The restrained light palette is intentional and
-remains consistent across desktops rather than following a dark or system theme.
+centered layer-shell surface. The restrained light palette is the default and
+remains consistent across desktops; an opt-in dark palette is also available.
 
 The current public release is **v0.1.2**.
 
@@ -20,8 +20,16 @@ The current public release is **v0.1.2**.
   preview refreshed once per second while that tab is active.
 - XDPH windows matched to Quickshell Hyprland toplevels by normalized 64-bit
   Hyprland address; the original XDPH window handle is returned unchanged.
-- Current workspace first, then workspace ID, preserving source order for ties.
-- Labels such as `[3] firefox: Project board` and themed application icons.
+- Current workspace first with workspace section headers, unmatched windows last,
+  and stable ordering after the user begins interacting.
+- Keyboard-first operation with initial focus, Enter-to-share, tab shortcuts,
+  visible hints, and ephemeral title/class/workspace filtering.
+- Labels such as `[3] firefox: Project board`, themed application icons, and
+  richer selected-source metadata.
+- Focused-monitor placement and selection, selected-output previews, and a
+  transient physical-monitor identification overlay.
+- Region cancellation recovery and a validated, output-geometry-aware
+  “Repeat last region” action.
 - Restore tokens enabled by default, with the optional upstream-compatible user
   choice controlled by `XDPH_PICKER_ALLOW_TOKEN_SELECTION`.
 - Width and height persistence under the user's XDG state directory.
@@ -170,6 +178,7 @@ line directly.
 - `XDPH_PICKER_ALLOW_TOKEN_SELECTION` (presence shows the restore-token choice)
 - `XDPH_PICKER_DEFAULT_TAB=screen|window|region` (default: `window`)
 - `QSP_TIMEOUT_SECONDS=5..600` (default: `120`)
+- `QSP_THEME=light|dark` (default: `light`)
 - `QS_ICON_THEME=<theme>` to override Quickshell's icon theme
 
 `QSP_*` path/binary overrides exist for tests and development. They should not

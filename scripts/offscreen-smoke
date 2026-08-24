@@ -52,6 +52,7 @@ run_case() {
     live_test=${5:-0}
     case_session=${6:-$session_file}
     smoke_region=${7:-0}
+    theme=${8:-light}
     if [ "$smoke_region" = 1 ]; then
         default_tab=region
     else
@@ -61,6 +62,7 @@ run_case() {
     mkdir -m 700 "$case_dir"
     result_file=$case_dir/result
     region_request_file=$case_dir/region-request.json
+    repeat_region_request_file=$case_dir/repeat-region-request.json
     slurp_output_file=$case_dir/slurp-output
     geometry_file=$case_dir/geometry.json
     log_file=$case_dir/quickshell.log
@@ -75,6 +77,8 @@ run_case() {
         QSP_GEOMETRY_FILE="$geometry_file" \
         QSP_LIVE_TEST_MODE="$live_test" \
         QSP_REGION_REQUEST_FILE="$region_request_file" \
+        QSP_REGION_RECOVERY="$smoke_region" \
+        QSP_REPEAT_REGION_REQUEST_FILE="$repeat_region_request_file" \
         QSP_RESULT_FILE="$result_file" \
         QSP_SESSION_FILE="$case_session" \
         QSP_SLURP_AVAILABLE="$smoke_region" \
@@ -83,6 +87,7 @@ run_case() {
         QSP_SMOKE_REGION="$smoke_region" \
         QSP_SMOKE_UNCHECK_TOKEN="$uncheck" \
         QSP_TEST_MODE=0 \
+        QSP_THEME="$theme" \
         XDPH_PICKER_DEFAULT_TAB="$default_tab" \
         XDG_CACHE_HOME="$temporary/cache" \
         XDG_DATA_HOME="$temporary/data" \
@@ -117,5 +122,6 @@ run_case hidden 0 0 '[SELECTION]r/window:17'
 run_case shown-checked 1 0 '[SELECTION]r/window:17'
 run_case shown-unchecked 1 1 '[SELECTION]/window:17'
 run_case live-test 0 0 '[SELECTION]r/window:1' 1 "$live_session_file"
+run_case dark 0 0 '[SELECTION]r/window:17' 0 "$session_file" 0 dark
 run_case region 0 0 '[SELECTION]r/region:DP-1@10,20,30,40' 0 "$live_session_file" 1
 printf 'PASS real QML offscreen smoke\n'

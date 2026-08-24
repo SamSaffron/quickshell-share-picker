@@ -13,23 +13,42 @@ Item {
 
     required property var hostWindow
 
-    readonly property color backgroundColor: "#f7f7f8"
-    readonly property color surfaceColor: "#ffffff"
-    readonly property color borderColor: "#d8dadd"
-    readonly property color textColor: "#202124"
-    readonly property color mutedTextColor: "#687078"
-    readonly property color accentColor: "#2864dc"
-    readonly property color selectedColor: "#e7efff"
+    readonly property string themeName: String(Quickshell.env("QSP_THEME") || "light").toLowerCase()
+    readonly property bool darkTheme: themeName === "dark"
+    readonly property color backgroundColor: darkTheme ? "#181a1f" : "#f7f7f8"
+    readonly property color surfaceColor: darkTheme ? "#22252b" : "#ffffff"
+    readonly property color borderColor: darkTheme ? "#3a3f47" : "#d8dadd"
+    readonly property color textColor: darkTheme ? "#f1f3f5" : "#202124"
+    readonly property color mutedTextColor: darkTheme ? "#aab0b8" : "#687078"
+    readonly property color accentColor: darkTheme ? "#6ea0ff" : "#2864dc"
+    readonly property color selectedColor: darkTheme ? "#2b4168" : "#e7efff"
+    readonly property color tabColor: darkTheme ? "#20242a" : "#f1f2f4"
+    readonly property color tabHoverColor: darkTheme ? "#2b3038" : "#e6e8eb"
+    readonly property color listColor: darkTheme ? "#1e2127" : "#fbfbfc"
+    readonly property color previewColor: darkTheme ? "#111318" : "#17191c"
+    readonly property color tooltipColor: darkTheme ? "#30343b" : "#2b2e33"
+    readonly property color tooltipBorderColor: darkTheme ? "#606875" : "#545960"
+    readonly property color tooltipTextColor: "#f5f6f7"
+    readonly property color metadataColor: darkTheme ? "#dd181a1f" : "#dd202328"
     readonly property bool testMode: Quickshell.env("QSP_TEST_MODE") === "1"
     readonly property bool liveTestMode: Quickshell.env("QSP_LIVE_TEST_MODE") === "1"
     readonly property bool smokeMode: Quickshell.env("QSP_SMOKE_MODE") === "1"
         && Quickshell.env("QT_QPA_PLATFORM") === "offscreen"
     readonly property bool slurpAvailable: Quickshell.env("QSP_SLURP_AVAILABLE") === "1"
+    readonly property bool regionRecovery: Quickshell.env("QSP_REGION_RECOVERY") === "1"
     readonly property bool allowTokenSelection: Quickshell.env("QSP_ALLOW_TOKEN_SELECTION") === "1"
+    property var preferredScreen: null
     readonly property var session: loadSession()
 
     property var screenEntries: []
     property var windowEntries: []
+    property var filteredWindowEntries: []
+    property string windowFilterText: ""
+    property bool windowFilterActive: false
+    property bool windowOrderingFrozen: false
+    property var identificationScreen: null
+    property string identificationLabel: ""
+    property bool identificationVisible: false
     property bool windowModelReady: false
     property bool finalized: false
     property bool rebuilding: false
@@ -101,6 +120,19 @@ Item {
         return Quickshell.iconPath("application-x-executable", true);
     }
 
+    function resolvePreferredScreen() {
+        const screens = [...Quickshell.screens];
+        if (screens.length === 0)
+            return null;
+        const focused = Hyprland.focusedMonitor;
+        if (focused) {
+            const match = screens.find(screen => String(screen.name) === String(focused.name));
+            if (match)
+                return match;
+        }
+        return screens[0];
+    }
+
     function rebuildScreens() {
         const source = session.mock && session.mock.enabled
             ? session.mock.screens
@@ -108,10 +140,16 @@ Item {
         const result = [];
         for (let index = 0; index < source.length; ++index) {
             const screen = source[index];
+            const monitor = session.mock && session.mock.enabled ? null : Hyprland.monitorFor(screen);
+            const refreshRate = monitor && monitor.lastIpcObject
+                ? Number(monitor.lastIpcObject["refreshRate"] || 0) : 0;
             result.push({
                 "height": Number(screen.height),
                 "index": index,
+                "monitor": monitor,
                 "name": String(screen.name),
+                "refreshRate": refreshRate,
+                "scale": monitor ? Number(monitor.scale) : Number(screen.scale || 1),
                 "screen": session.mock && session.mock.enabled ? null : screen,
                 "width": Number(screen.width),
                 "x": Number(screen.x),
@@ -119,8 +157,11 @@ Item {
             });
         }
         screenEntries = result;
-        if (screenList.currentIndex < 0 && result.length > 0)
-            screenList.currentIndex = 0;
+        if (screenList.currentIndex < 0 && result.length > 0) {
+            const preferredName = preferredScreen ? String(preferredScreen.name) : "";
+            const preferredIndex = result.findIndex(entry => entry.name === preferredName);
+            screenList.currentIndex = preferredIndex >= 0 ? preferredIndex : 0;
+        }
     }
 
     function runtimeToplevels() {
@@ -135,6 +176,60 @@ Item {
         return Hyprland.focusedWorkspace ? Number(Hyprland.focusedWorkspace.id) : -1;
     }
 
+    function workspaceSection(workspaceId, workspaceName, isCurrent, matched) {
+        if (!matched)
+            return "Unavailable workspace";
+        if (isCurrent)
+            return "Current · " + (workspaceName || workspaceId);
+        if (workspaceId > 0)
+            return "Workspace " + (workspaceName || workspaceId);
+        return "Special · " + (workspaceName || "workspace");
+    }
+
+    function workspaceSortCategory(workspaceId, isCurrent, matched) {
+        if (isCurrent)
+            return 0;
+        if (matched && workspaceId > 0)
+            return 1;
+        if (matched)
+            return 2;
+        return 3;
+    }
+
+    function windowKey(entry) {
+        return liveTestMode ? entry.address : entry.handle;
+    }
+
+    function refreshFilteredWindows() {
+        const previous = selectedWindow();
+        const previousKey = previous ? windowKey(previous) : "";
+        const query = windowFilterText.trim().toLowerCase();
+        const result = query ? windowEntries.filter(entry => {
+            const haystack = (entry.className + " " + entry.title + " "
+                + entry.workspaceName + " " + entry.workspaceId).toLowerCase();
+            return haystack.includes(query);
+        }) : windowEntries;
+        filteredWindowEntries = result;
+        let selectedIndex = result.length > 0 ? 0 : -1;
+        if (previousKey) {
+            const preservedIndex = result.findIndex(entry => windowKey(entry) === previousKey);
+            if (preservedIndex >= 0)
+                selectedIndex = preservedIndex;
+        }
+        windowList.currentIndex = selectedIndex;
+    }
+
+    function focusCurrentTab() {
+        Qt.callLater(() => {
+            if (tabs.currentIndex === 0)
+                screenList.forceActiveFocus();
+            else if (tabs.currentIndex === 1)
+                (windowFilterActive ? windowFilter : windowList).forceActiveFocus();
+            else
+                regionButton.forceActiveFocus();
+        });
+    }
+
     function windowModelsEqual(left, right) {
         if (left.length !== right.length)
             return false;
@@ -145,7 +240,8 @@ Item {
                     || a.className !== b.className || a.handle !== b.handle
                     || a.matched !== b.matched || a.sourceIndex !== b.sourceIndex
                     || a.title !== b.title || a.workspaceId !== b.workspaceId
-                    || a.workspaceName !== b.workspaceName
+                    || a.workspaceName !== b.workspaceName || a.sectionLabel !== b.sectionLabel
+                    || a.sortCategory !== b.sortCategory
                     || a.isCurrentWorkspace !== b.isCurrentWorkspace)
                 return false;
         }
@@ -158,8 +254,6 @@ Item {
         rebuilding = true;
 
         try {
-            const previous = selectedWindow();
-            const previousKey = previous ? (liveTestMode ? previous.address : previous.handle) : "";
             const toplevels = runtimeToplevels();
             const currentWorkspace = currentWorkspaceId();
             const result = [];
@@ -180,6 +274,9 @@ Item {
                         "title": String(toplevel.title || (wayland ? wayland.title : "")),
                         "workspaceId": workspaceId,
                         "workspaceName": workspace ? String(workspace.name) : "",
+                        "sectionLabel": workspaceSection(workspaceId, workspace ? String(workspace.name) : "",
+                            workspaceId === currentWorkspace, true),
+                        "sortCategory": workspaceSortCategory(workspaceId, workspaceId === currentWorkspace, true),
                         "isCurrentWorkspace": workspaceId === currentWorkspace
                     });
                 }
@@ -213,15 +310,46 @@ Item {
                         "title": String(portalWindow.title || (match ? match.title : "")),
                         "workspaceId": workspaceId,
                         "workspaceName": workspaceName,
+                        "sectionLabel": workspaceSection(workspaceId, workspaceName,
+                            workspaceId === currentWorkspace, match !== null),
+                        "sortCategory": workspaceSortCategory(workspaceId,
+                            workspaceId === currentWorkspace, match !== null),
                         "isCurrentWorkspace": workspaceId === currentWorkspace
                     });
                 }
             }
 
+            const previousOrder = {};
+            const previousEntries = {};
+            for (let index = 0; index < windowEntries.length; ++index) {
+                const key = windowKey(windowEntries[index]);
+                previousOrder[key] = index;
+                previousEntries[key] = windowEntries[index];
+            }
+            if (windowOrderingFrozen) {
+                for (let index = 0; index < result.length; ++index) {
+                    const previousEntry = previousEntries[windowKey(result[index])];
+                    if (previousEntry) {
+                        result[index].sectionLabel = previousEntry.sectionLabel;
+                        result[index].sortCategory = previousEntry.sortCategory;
+                    }
+                }
+            }
+
             result.sort((left, right) => {
-                if (left.isCurrentWorkspace !== right.isCurrentWorkspace)
-                    return left.isCurrentWorkspace ? -1 : 1;
-                if (left.workspaceId !== right.workspaceId)
+                if (windowOrderingFrozen) {
+                    const leftOrder = previousOrder[windowKey(left)];
+                    const rightOrder = previousOrder[windowKey(right)];
+                    const leftKnown = leftOrder !== undefined;
+                    const rightKnown = rightOrder !== undefined;
+                    if (leftKnown !== rightKnown)
+                        return leftKnown ? -1 : 1;
+                    if (leftKnown && leftOrder !== rightOrder)
+                        return leftOrder - rightOrder;
+                }
+                if (left.sortCategory !== right.sortCategory)
+                    return left.sortCategory - right.sortCategory;
+                if (left.sortCategory === 1 && left.workspaceId !== right.workspaceId)
                     return left.workspaceId - right.workspaceId;
                 return left.sourceIndex - right.sourceIndex;
             });
@@ -230,16 +358,21 @@ Item {
                 return;
 
             windowEntries = result;
-            let selectedIndex = result.length > 0 ? 0 : -1;
-            if (previousKey) {
-                const preservedIndex = result.findIndex(entry => (liveTestMode ? entry.address : entry.handle) === previousKey);
-                if (preservedIndex >= 0)
-                    selectedIndex = preservedIndex;
-            }
-            windowList.currentIndex = selectedIndex;
+            refreshFilteredWindows();
         } finally {
             rebuilding = false;
         }
+    }
+
+    function requestScreenIdentification(entry) {
+        if (!entry || !entry.screen || testMode || smokeMode)
+            return;
+        identificationScreen = entry.screen;
+        const rate = entry.refreshRate > 0 ? " · " + Math.round(entry.refreshRate) + " Hz" : "";
+        identificationLabel = entry.name + "\n" + entry.width + "×" + entry.height
+            + " · scale " + entry.scale + rate;
+        identificationVisible = false;
+        identificationDelay.restart();
     }
 
     function selectedScreen() {
@@ -249,7 +382,7 @@ Item {
 
     function selectedWindow() {
         const index = windowList.currentIndex;
-        return index >= 0 && index < windowEntries.length ? windowEntries[index] : null;
+        return index >= 0 && index < filteredWindowEntries.length ? filteredWindowEntries[index] : null;
     }
 
     function finish(selection) {
@@ -285,22 +418,53 @@ Item {
         }
     }
 
-    function selectRegion() {
-        if (!slurpAvailable || finalized)
-            return;
-        finalized = true;
-        saveGeometry();
-        const allowRestore = restoreToken.visible ? restoreToken.checked : true;
-        const screens = screenEntries.map(entry => ({
+    function lastRegionAvailable() {
+        const region = session.lastRegion;
+        if (!region)
+            return false;
+        const screen = screenEntries.find(entry => entry.name === region.output);
+        return screen !== undefined
+            && screen.width === region.outputWidth
+            && screen.height === region.outputHeight
+            && region.x >= 0 && region.y >= 0
+            && region.width > 0 && region.height > 0
+            && region.x + region.width <= screen.width
+            && region.y + region.height <= screen.height;
+    }
+
+    function regionScreens() {
+        return screenEntries.map(entry => ({
             "height": entry.height,
             "name": entry.name,
             "width": entry.width,
             "x": entry.x,
             "y": entry.y
         }));
+    }
+
+    function selectRegion() {
+        if (!slurpAvailable || finalized)
+            return;
+        finalized = true;
+        saveGeometry();
+        const allowRestore = restoreToken.visible ? restoreToken.checked : true;
         regionRequestFile.setText(JSON.stringify({
             "allowRestore": allowRestore,
-            "screens": screens
+            "screens": regionScreens()
+        }) + "\n");
+        Qt.quit();
+    }
+
+    function repeatLastRegion() {
+        if (!session.lastRegion || finalized)
+            return;
+        finalized = true;
+        saveGeometry();
+        const allowRestore = restoreToken.visible ? restoreToken.checked : true;
+        repeatRegionRequestFile.setText(JSON.stringify({
+            "allowRestore": allowRestore,
+            "region": session.lastRegion,
+            "screens": regionScreens()
         }) + "\n");
         Qt.quit();
     }
@@ -319,10 +483,14 @@ Item {
             throw new Error("unexpected Quickshell app ID: " + Quickshell.appId);
         if (tabs.currentIndex !== (smokeRegion ? 2 : 1))
             throw new Error("picker did not open on the requested tab");
+        if (regionRecovery !== smokeRegion)
+            throw new Error("region recovery state did not follow the environment");
         if (rebuilding)
             throw new Error("window rebuild guard remained set");
         if (!windowModelReady)
             throw new Error("window model was published before it was ready");
+        if ((Quickshell.env("QSP_THEME") === "dark") !== darkTheme)
+            throw new Error("theme selection did not follow the environment");
         const stableEntries = windowEntries;
         rebuildWindows();
         if (windowEntries !== stableEntries)
@@ -333,6 +501,18 @@ Item {
             throw new Error("selected screen preview refresh timer is misconfigured");
         if (screenEntries.length > 0 && screenList.currentIndex !== 0)
             throw new Error("first screen was not selected before publication");
+        if (!smokeRegion && windowEntries.length > 0) {
+            windowFilterText = windowEntries[0].className.toLowerCase();
+            refreshFilteredWindows();
+            if (filteredWindowEntries.length === 0)
+                throw new Error("window filter hid a matching entry");
+            windowFilterText = "";
+            refreshFilteredWindows();
+            if (filteredWindowEntries.length !== windowEntries.length)
+                throw new Error("clearing the window filter did not restore the model");
+            if (!windowEntries[0].sectionLabel)
+                throw new Error("window workspace section label is missing");
+        }
         if (!smokeRegion && liveTestMode) {
             if (windowEntries.length !== 3 || !selectedWindow()
                     || selectedWindow().handle !== "1" || selectedWindow().address !== "abc123")
@@ -350,8 +530,10 @@ Item {
     }
 
     Component.onCompleted: {
+        preferredScreen = resolvePreferredScreen();
         rebuildScreens();
-        const requestedTab = String(Quickshell.env("XDPH_PICKER_DEFAULT_TAB") || "window").toLowerCase();
+        const requestedTab = regionRecovery ? "region"
+            : String(Quickshell.env("XDPH_PICKER_DEFAULT_TAB") || "window").toLowerCase();
         tabs.currentIndex = requestedTab === "screen" ? 0 : requestedTab === "region" ? 2 : 1;
         restoreToken.checked = Quickshell.env("QSP_ALLOW_TOKEN") !== "0";
         if (smokeMode) {
@@ -405,6 +587,14 @@ Item {
     }
 
     FileView {
+        id: repeatRegionRequestFile
+        path: String(Quickshell.env("QSP_REPEAT_REGION_REQUEST_FILE") || "")
+        blockWrites: true
+        atomicWrites: true
+        printErrors: false
+    }
+
+    FileView {
         id: geometryFile
         path: String(Quickshell.env("QSP_GEOMETRY_FILE") || "")
         blockLoading: true
@@ -414,12 +604,28 @@ Item {
     }
 
     Timer {
+        id: identificationDelay
+        interval: 500
+        onTriggered: {
+            picker.identificationVisible = true;
+            identificationTimeout.restart();
+        }
+    }
+
+    Timer {
+        id: identificationTimeout
+        interval: 1000
+        onTriggered: picker.identificationVisible = false
+    }
+
+    Timer {
         id: initialWindowTimer
         interval: 250
         onTriggered: {
             picker.windowModelReady = true;
             picker.rebuildScreens();
             picker.rebuildWindows();
+            picker.focusCurrentTab();
             rebuildTimer.start();
         }
     }
@@ -439,7 +645,53 @@ Item {
 
     Shortcut {
         sequences: [StandardKey.Cancel]
-        onActivated: picker.cancel()
+        onActivated: {
+            if (picker.windowFilterActive) {
+                picker.windowFilterText = "";
+                picker.windowFilterActive = false;
+                picker.refreshFilteredWindows();
+                windowList.forceActiveFocus();
+            } else {
+                picker.cancel();
+            }
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+1"
+        onActivated: tabs.currentIndex = 0
+    }
+
+    Shortcut {
+        sequence: "Ctrl+2"
+        onActivated: tabs.currentIndex = 1
+    }
+
+    Shortcut {
+        sequence: "Ctrl+3"
+        onActivated: tabs.currentIndex = 2
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Tab"
+        onActivated: tabs.currentIndex = (tabs.currentIndex + 1) % 3
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+Tab"
+        onActivated: tabs.currentIndex = (tabs.currentIndex + 2) % 3
+    }
+
+    Shortcut {
+        sequence: "/"
+        enabled: tabs.currentIndex === 1 && !picker.windowFilterActive
+        onActivated: {
+            picker.windowOrderingFrozen = true;
+            picker.windowFilterActive = true;
+            picker.windowFilterText = "";
+            picker.refreshFilteredWindows();
+            picker.focusCurrentTab();
+        }
     }
 
     Shortcut {
@@ -502,15 +754,72 @@ Item {
                     TabBar {
                         id: tabs
                         Layout.fillWidth: true
+                        Layout.preferredHeight: 48
+                        palette.buttonText: picker.textColor
+                        palette.highlight: picker.selectedColor
+                        palette.highlightedText: picker.textColor
+                        palette.windowText: picker.textColor
+                        onCurrentIndexChanged: {
+                            if (picker.windowModelReady)
+                                picker.focusCurrentTab();
+                        }
                         background: Rectangle {
-                            color: "#f1f2f4"
+                            color: picker.tabColor
                             border.color: picker.borderColor
                             border.width: 1
                         }
 
-                        TabButton { text: "Screen" }
-                        TabButton { text: "Window" }
-                        TabButton { text: "Region" }
+                        TabButton {
+                            text: "Screen"
+                            hoverEnabled: true
+                            background: Rectangle {
+                                color: parent.checked ? picker.selectedColor
+                                    : parent.hovered ? picker.tabHoverColor : picker.tabColor
+                                border.color: picker.borderColor
+                                border.width: 1
+                            }
+                            contentItem: Text {
+                                color: picker.textColor
+                                font.weight: parent.checked ? Font.DemiBold : Font.Normal
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                text: parent.text
+                            }
+                        }
+                        TabButton {
+                            text: "Window"
+                            hoverEnabled: true
+                            background: Rectangle {
+                                color: parent.checked ? picker.selectedColor
+                                    : parent.hovered ? picker.tabHoverColor : picker.tabColor
+                                border.color: picker.borderColor
+                                border.width: 1
+                            }
+                            contentItem: Text {
+                                color: picker.textColor
+                                font.weight: parent.checked ? Font.DemiBold : Font.Normal
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                text: parent.text
+                            }
+                        }
+                        TabButton {
+                            text: "Region"
+                            hoverEnabled: true
+                            background: Rectangle {
+                                color: parent.checked ? picker.selectedColor
+                                    : parent.hovered ? picker.tabHoverColor : picker.tabColor
+                                border.color: picker.borderColor
+                                border.width: 1
+                            }
+                            contentItem: Text {
+                                color: picker.textColor
+                                font.weight: parent.checked ? Font.DemiBold : Font.Normal
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                text: parent.text
+                            }
+                        }
                     }
 
                     StackLayout {
@@ -529,7 +838,7 @@ Item {
                                     Layout.minimumWidth: 220
                                     Layout.maximumWidth: 300
                                     Layout.fillHeight: true
-                                    color: "#fbfbfc"
+                                    color: picker.listColor
                                     border.color: picker.borderColor
                                     border.width: 1
                                     radius: 4
@@ -544,11 +853,16 @@ Item {
                                         model: picker.screenEntries
                                         activeFocusOnTab: true
                                         keyNavigationEnabled: true
+                                        Keys.onReturnPressed: event => {
+                                            if (picker.selectedScreen())
+                                                picker.shareCurrent();
+                                            event.accepted = true;
+                                        }
                                         highlightMoveDuration: 80
                                         highlight: Rectangle {
                                             color: picker.selectedColor
-                                            border.color: picker.accentColor
-                                            border.width: 1
+                                            border.color: screenList.activeFocus ? picker.accentColor : picker.borderColor
+                                            border.width: screenList.activeFocus ? 2 : 1
                                             radius: 4
                                         }
 
@@ -587,7 +901,12 @@ Item {
 
                                             MouseArea {
                                                 anchors.fill: parent
-                                                onClicked: screenList.currentIndex = screenDelegate.index
+                                                hoverEnabled: true
+                                                onEntered: picker.requestScreenIdentification(screenDelegate.modelData)
+                                                onClicked: {
+                                                    screenList.currentIndex = screenDelegate.index;
+                                                    picker.requestScreenIdentification(screenDelegate.modelData);
+                                                }
                                                 onDoubleClicked: {
                                                     screenList.currentIndex = screenDelegate.index;
                                                     picker.finish("screen:" + screenDelegate.modelData.name);
@@ -608,7 +927,7 @@ Item {
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
                                     Layout.minimumWidth: 200
-                                    color: "#17191c"
+                                    color: picker.previewColor
                                     radius: 4
                                     clip: true
 
@@ -636,8 +955,19 @@ Item {
                                         onTriggered: screenPreview.captureFrame()
                                     }
 
+                                    BusyIndicator {
+                                        anchors.centerIn: parent
+                                        anchors.verticalCenterOffset: -18
+                                        width: 32
+                                        height: 32
+                                        running: visible
+                                        visible: screenPreviewFrame.selection && screenPreview.captureSource
+                                            && !screenPreview.hasContent
+                                    }
+
                                     Text {
                                         anchors.centerIn: parent
+                                        anchors.verticalCenterOffset: 22
                                         width: parent.width - 40
                                         horizontalAlignment: Text.AlignHCenter
                                         wrapMode: Text.WordWrap
@@ -651,6 +981,45 @@ Item {
                                             if (!screenPreviewFrame.selection.screen)
                                                 return "No preview available";
                                             return "Loading preview…";
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.bottom: parent.bottom
+                                        height: 52
+                                        color: picker.metadataColor
+                                        visible: screenPreviewFrame.selection !== null
+
+                                        Column {
+                                            anchors.left: parent.left
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            anchors.leftMargin: 12
+                                            anchors.rightMargin: 12
+                                            spacing: 2
+
+                                            Text {
+                                                width: parent.width
+                                                color: picker.tooltipTextColor
+                                                elide: Text.ElideRight
+                                                font.weight: Font.DemiBold
+                                                text: screenPreviewFrame.selection ? screenPreviewFrame.selection.name : ""
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                color: "#c8cbd0"
+                                                elide: Text.ElideRight
+                                                font.pixelSize: 11
+                                                text: screenPreviewFrame.selection
+                                                    ? screenPreviewFrame.selection.width + "×" + screenPreviewFrame.selection.height
+                                                        + " · scale " + screenPreviewFrame.selection.scale
+                                                        + (screenPreviewFrame.selection.refreshRate > 0
+                                                            ? " · " + Math.round(screenPreviewFrame.selection.refreshRate) + " Hz" : "")
+                                                    : ""
+                                            }
                                         }
                                     }
                                 }
@@ -668,26 +1037,102 @@ Item {
                                     Layout.minimumWidth: 220
                                     Layout.maximumWidth: 300
                                     Layout.fillHeight: true
-                                    color: "#fbfbfc"
+                                    color: picker.listColor
                                     border.color: picker.borderColor
                                     border.width: 1
                                     radius: 4
 
-                                    ListView {
-                                        id: windowList
-                                        readonly property real scrollGutter: windowScrollBar.visible ? windowScrollBar.width + 4 : 0
+                                    ColumnLayout {
                                         anchors.fill: parent
                                         anchors.margins: 4
+                                        spacing: 4
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            visible: picker.windowFilterActive
+                                            spacing: 6
+
+                                            TextField {
+                                                id: windowFilter
+                                                Layout.fillWidth: true
+                                                placeholderText: "Filter windows…"
+                                                palette.base: picker.surfaceColor
+                                                palette.text: picker.textColor
+                                                palette.placeholderText: picker.mutedTextColor
+                                                palette.highlight: picker.accentColor
+                                                palette.highlightedText: picker.tooltipTextColor
+                                                text: picker.windowFilterText
+                                                selectByMouse: true
+                                                onTextEdited: {
+                                                    picker.windowFilterText = text;
+                                                    picker.refreshFilteredWindows();
+                                                }
+                                                Keys.onEscapePressed: event => {
+                                                    if (text.length > 0) {
+                                                        clear();
+                                                        picker.windowFilterText = "";
+                                                        picker.refreshFilteredWindows();
+                                                    } else {
+                                                        picker.windowFilterActive = false;
+                                                        windowList.forceActiveFocus();
+                                                    }
+                                                    event.accepted = true;
+                                                }
+                                                Keys.onReturnPressed: event => {
+                                                    if (picker.selectedWindow())
+                                                        picker.shareCurrent();
+                                                    event.accepted = true;
+                                                }
+                                            }
+
+                                            Text {
+                                                color: picker.mutedTextColor
+                                                text: picker.filteredWindowEntries.length + " of " + picker.windowEntries.length
+                                            }
+                                        }
+
+                                        ListView {
+                                            id: windowList
+                                            readonly property real scrollGutter: windowScrollBar.visible ? windowScrollBar.width + 4 : 0
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
                                         clip: true
                                         spacing: 2
-                                        model: picker.windowEntries
+                                        model: picker.filteredWindowEntries
                                         activeFocusOnTab: true
                                         keyNavigationEnabled: true
                                         highlightMoveDuration: 80
+                                        section.property: "sectionLabel"
+                                        section.criteria: ViewSection.FullString
+                                        section.delegate: Rectangle {
+                                            required property string section
+                                            width: windowList.width - windowList.scrollGutter
+                                            height: 24
+                                            color: picker.backgroundColor
+
+                                            Text {
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                anchors.leftMargin: 8
+                                                anchors.rightMargin: 8
+                                                color: picker.mutedTextColor
+                                                elide: Text.ElideRight
+                                                font.pixelSize: 11
+                                                font.weight: Font.DemiBold
+                                                text: section
+                                            }
+                                        }
+                                        Keys.onReturnPressed: event => {
+                                            picker.windowOrderingFrozen = true;
+                                            if (picker.selectedWindow())
+                                                picker.shareCurrent();
+                                            event.accepted = true;
+                                        }
                                         highlight: Rectangle {
                                             color: picker.selectedColor
-                                            border.color: picker.accentColor
-                                            border.width: 1
+                                            border.color: windowList.activeFocus ? picker.accentColor : picker.borderColor
+                                            border.width: windowList.activeFocus ? 2 : 1
                                             radius: 4
                                         }
 
@@ -717,8 +1162,14 @@ Item {
                                                     Layout.fillWidth: true
                                                     color: picker.textColor
                                                     elide: Text.ElideRight
-                                                    text: (windowDelegate.modelData.workspaceName ? "[" + windowDelegate.modelData.workspaceName + "] " : "")
-                                                        + windowDelegate.modelData.className + ": " + windowDelegate.modelData.title
+                                                    text: windowDelegate.modelData.className + ": " + windowDelegate.modelData.title
+                                                }
+
+                                                Text {
+                                                    visible: !windowDelegate.modelData.matched
+                                                    color: picker.mutedTextColor
+                                                    font.pixelSize: 10
+                                                    text: "No preview"
                                                 }
                                             }
 
@@ -726,8 +1177,12 @@ Item {
                                                 id: windowMouseArea
                                                 anchors.fill: parent
                                                 hoverEnabled: true
-                                                onClicked: windowList.currentIndex = windowDelegate.index
+                                                onClicked: {
+                                                    picker.windowOrderingFrozen = true;
+                                                    windowList.currentIndex = windowDelegate.index;
+                                                }
                                                 onDoubleClicked: {
+                                                    picker.windowOrderingFrozen = true;
                                                     windowList.currentIndex = windowDelegate.index;
                                                     picker.finish("window:" + windowDelegate.modelData.handle);
                                                 }
@@ -754,7 +1209,7 @@ Item {
                                                 contentItem: Text {
                                                     id: windowToolTipText
                                                     width: windowToolTip.width - windowToolTip.leftPadding - windowToolTip.rightPadding
-                                                    color: "#f5f6f7"
+                                                    color: picker.tooltipTextColor
                                                     elide: Text.ElideRight
                                                     maximumLineCount: 3
                                                     wrapMode: Text.Wrap
@@ -762,8 +1217,8 @@ Item {
                                                 }
 
                                                 background: Rectangle {
-                                                    color: "#2b2e33"
-                                                    border.color: "#545960"
+                                                    color: picker.tooltipColor
+                                                    border.color: picker.tooltipBorderColor
                                                     border.width: 1
                                                     radius: 4
                                                 }
@@ -788,10 +1243,23 @@ Item {
 
                                         }
 
+                                        Text {
+                                            anchors.centerIn: parent
+                                            width: parent.width - 32
+                                            color: picker.mutedTextColor
+                                            horizontalAlignment: Text.AlignHCenter
+                                            wrapMode: Text.WordWrap
+                                            visible: picker.filteredWindowEntries.length === 0
+                                            text: picker.windowFilterText
+                                                ? "No windows match this filter"
+                                                : "No shareable windows\nTry Screen or Region"
+                                        }
+
                                         ScrollBar.vertical: ScrollBar {
                                             id: windowScrollBar
                                             policy: ScrollBar.AsNeeded
                                             width: 8
+                                        }
                                         }
                                     }
                                 }
@@ -800,7 +1268,7 @@ Item {
                                     id: previewFrame
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
-                                    color: "#17191c"
+                                    color: picker.previewColor
                                     radius: 4
                                     clip: true
 
@@ -827,8 +1295,18 @@ Item {
                                         onTriggered: preview.captureFrame()
                                     }
 
+                                    BusyIndicator {
+                                        anchors.centerIn: parent
+                                        anchors.verticalCenterOffset: -18
+                                        width: 32
+                                        height: 32
+                                        running: visible
+                                        visible: previewFrame.selection && preview.captureSource && !preview.hasContent
+                                    }
+
                                     Text {
                                         anchors.centerIn: parent
+                                        anchors.verticalCenterOffset: 22
                                         width: parent.width - 40
                                         horizontalAlignment: Text.AlignHCenter
                                         wrapMode: Text.WordWrap
@@ -844,6 +1322,41 @@ Item {
                                             return "Loading preview…";
                                         }
                                     }
+
+                                    Rectangle {
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.bottom: parent.bottom
+                                        height: 62
+                                        color: picker.metadataColor
+                                        visible: previewFrame.selection !== null
+
+                                        Column {
+                                            anchors.left: parent.left
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            anchors.leftMargin: 12
+                                            anchors.rightMargin: 12
+                                            spacing: 2
+
+                                            Text {
+                                                width: parent.width
+                                                color: picker.tooltipTextColor
+                                                elide: Text.ElideRight
+                                                font.weight: Font.DemiBold
+                                                text: previewFrame.selection ? previewFrame.selection.className : ""
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                color: "#c8cbd0"
+                                                elide: Text.ElideRight
+                                                maximumLineCount: 2
+                                                wrapMode: Text.Wrap
+                                                text: previewFrame.selection ? previewFrame.selection.title : ""
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -854,13 +1367,40 @@ Item {
                                 anchors.margins: 14
                                 spacing: 12
 
+                                Text {
+                                    Layout.fillWidth: true
+                                    visible: picker.regionRecovery
+                                    color: picker.mutedTextColor
+                                    wrapMode: Text.WordWrap
+                                    text: "Region selection was canceled. Choose again, repeat the last region, or use another tab."
+                                }
+
                                 Button {
                                     id: regionButton
+                                    palette.button: picker.listColor
+                                    palette.buttonText: picker.textColor
+                                    palette.highlight: picker.accentColor
                                     Layout.fillWidth: true
                                     Layout.minimumHeight: 40
                                     enabled: picker.slurpAvailable
                                     text: picker.slurpAvailable ? "Select Region…" : "Select Region… (slurp is not installed)"
                                     onClicked: picker.selectRegion()
+                                }
+
+                                Button {
+                                    palette.button: picker.listColor
+                                    palette.buttonText: picker.textColor
+                                    palette.highlight: picker.accentColor
+                                    Layout.fillWidth: true
+                                    Layout.minimumHeight: 40
+                                    visible: picker.lastRegionAvailable()
+                                    enabled: picker.lastRegionAvailable()
+                                    text: picker.session.lastRegion
+                                        ? "Repeat " + picker.session.lastRegion.output + " region — "
+                                            + picker.session.lastRegion.width + "×" + picker.session.lastRegion.height
+                                            + " at " + picker.session.lastRegion.x + "," + picker.session.lastRegion.y
+                                        : "Repeat last region"
+                                    onClicked: picker.repeatLastRegion()
                                 }
 
                                 Item { Layout.fillHeight: true }
@@ -872,6 +1412,8 @@ Item {
 
             CheckBox {
                 id: restoreToken
+                palette.buttonText: picker.textColor
+                palette.windowText: picker.textColor
                 visible: picker.allowTokenSelection
                 text: "Allow a restore token"
                 hoverEnabled: true
@@ -884,10 +1426,21 @@ Item {
                 Layout.fillWidth: true
                 spacing: 8
 
+                Text {
+                    color: picker.mutedTextColor
+                    font.pixelSize: 11
+                    text: tabs.currentIndex === 1
+                        ? "↑↓ select   Enter share   / filter   Ctrl+1–3 tabs   Esc cancel"
+                        : "↑↓ select   Enter share   Ctrl+1–3 tabs   Esc cancel"
+                }
+
                 Item { Layout.fillWidth: true }
 
                 Button {
                     id: shareButton
+                    palette.button: picker.listColor
+                    palette.buttonText: picker.textColor
+                    palette.highlight: picker.accentColor
                     text: "Share"
                     enabled: picker.shareEnabled()
                     highlighted: true
@@ -895,6 +1448,8 @@ Item {
                 }
 
                 Button {
+                    palette.button: picker.listColor
+                    palette.buttonText: picker.textColor
                     text: "Cancel"
                     onClicked: picker.cancel()
                 }

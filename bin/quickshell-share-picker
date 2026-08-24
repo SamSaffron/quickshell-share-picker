@@ -112,20 +112,9 @@ trap 'exit 143' TERM
 session_file=$runtime_dir/session.json
 result_file=$runtime_dir/result
 region_request_file=$runtime_dir/region-request.json
+repeat_region_request_file=$runtime_dir/repeat-region-request.json
 slurp_output_file=$runtime_dir/slurp-output
 log_file=$runtime_dir/quickshell.log
-
-if [ "$test_mode" -eq 1 ]; then
-    "$python_bin" "$protocol_helper" prepare --output "$session_file" --fixture "$fixture_path" || \
-        fail "failed to prepare the mock session"
-elif [ "$live_test_mode" -eq 1 ]; then
-    XDPH_WINDOW_SHARING_LIST= \
-        "$python_bin" "$protocol_helper" prepare --output "$session_file" || \
-        fail "failed to prepare the live test session"
-else
-    "$python_bin" "$protocol_helper" prepare --output "$session_file" || \
-        fail "failed to parse XDPH_WINDOW_SHARING_LIST"
-fi
 
 state_dir=${QSP_STATE_DIR:-}
 if [ -z "$state_dir" ]; then
@@ -145,6 +134,22 @@ else
 fi
 [ -w "$state_dir" ] || fail "state directory is not writable: $state_dir"
 geometry_file=$state_dir/geometry.json
+region_state_file=$state_dir/last-region.json
+
+if [ "$test_mode" -eq 1 ]; then
+    "$python_bin" "$protocol_helper" prepare --output "$session_file" \
+        --fixture "$fixture_path" --region-state "$region_state_file" || \
+        fail "failed to prepare the mock session"
+elif [ "$live_test_mode" -eq 1 ]; then
+    XDPH_WINDOW_SHARING_LIST= \
+        "$python_bin" "$protocol_helper" prepare --output "$session_file" \
+            --region-state "$region_state_file" || \
+        fail "failed to prepare the live test session"
+else
+    "$python_bin" "$protocol_helper" prepare --output "$session_file" \
+        --region-state "$region_state_file" || \
+        fail "failed to parse XDPH_WINDOW_SHARING_LIST"
+fi
 
 case ${QSP_TIMEOUT_SECONDS:-$DEFAULT_TIMEOUT} in
     '' | *[!0-9]*) fail "QSP_TIMEOUT_SECONDS must be an integer from 5 to 600" ;;
@@ -176,6 +181,7 @@ fi
 export QSP_SESSION_FILE="$session_file"
 export QSP_RESULT_FILE="$result_file"
 export QSP_REGION_REQUEST_FILE="$region_request_file"
+export QSP_REPEAT_REGION_REQUEST_FILE="$repeat_region_request_file"
 export QSP_GEOMETRY_FILE="$geometry_file"
 export QSP_ALLOW_TOKEN=$allow_token
 export QSP_ALLOW_TOKEN_SELECTION=$allow_token_selection
@@ -185,35 +191,84 @@ export QSP_SLURP_AVAILABLE=$slurp_available
 export QSP_SLURP_BIN=$slurp_bin
 export QS_NO_RELOAD_POPUP=1
 
-# Quickshell's output is diagnostic, never picker protocol. Keep it away from
-# stdout and only replay a short tail to stderr if startup/runtime fails. GNU
-# timeout owns and bounds the complete qs process lifetime.
-timeout --signal=TERM --kill-after=2s "${timeout_seconds}s" \
-    "$qs_bin" --path "$config_path" --no-color >"$log_file" 2>&1 &
-child_pid=$!
+deadline=$("$python_bin" -c 'import sys,time; print(time.clock_gettime(time.CLOCK_MONOTONIC) + int(sys.argv[1]))' "$timeout_seconds")
+remaining_time() {
+    "$python_bin" -c 'import sys,time; print(max(0.0, float(sys.argv[1]) - time.clock_gettime(time.CLOCK_MONOTONIC)))' "$deadline"
+}
 
-qs_status=0
-if wait "$child_pid"; then
+recovery=0
+while :; do
+    rm -f -- "$result_file" "$region_request_file" "$repeat_region_request_file" \
+        "$slurp_output_file" "$runtime_dir/validated"
+    export QSP_REGION_RECOVERY=$recovery
+
+    remaining=$(remaining_time)
+    "$python_bin" -c 'import sys; raise SystemExit(0 if float(sys.argv[1]) > 0 else 1)' "$remaining" || {
+        printf '%s: picker timed out after %s seconds\n' "$PROGRAM" "$timeout_seconds" >&2
+        exit 124
+    }
+
+    # Quickshell's output is diagnostic, never picker protocol. Keep it away from
+    # stdout. GNU timeout owns each child while one shared deadline bounds the loop.
+    timeout --signal=TERM --kill-after=2s "${remaining}s" \
+        "$qs_bin" --path "$config_path" --no-color >"$log_file" 2>&1 &
+    child_pid=$!
     qs_status=0
-else
-    qs_status=$?
-fi
-child_pid=
-
-if [ -f "$result_file" ]; then
-    # The helper emits the already-validated line. Command substitution would
-    # strip its newline, so validate to a second private file and cat it.
-    validated_file=$runtime_dir/validated
-    if "$python_bin" "$protocol_helper" validate --file "$result_file" >"$validated_file"; then
-        cat -- "$validated_file"
-        exit 0
+    if wait "$child_pid"; then
+        qs_status=0
+    else
+        qs_status=$?
     fi
-    fail "the picker produced an invalid selection"
-fi
+    child_pid=
 
-if [ -f "$region_request_file" ]; then
+    if [ "$qs_status" -eq 124 ]; then
+        printf '%s: picker timed out after %s seconds\n' "$PROGRAM" "$timeout_seconds" >&2
+        tail -n 20 "$log_file" >&2 2>/dev/null || true
+        exit 124
+    fi
+    if [ "$qs_status" -ne 0 ]; then
+        printf '%s: Quickshell exited with status %s\n' "$PROGRAM" "$qs_status" >&2
+        tail -n 20 "$log_file" >&2 2>/dev/null || true
+        exit "$qs_status"
+    fi
+
+    action_count=0
+    [ ! -f "$result_file" ] || action_count=$((action_count + 1))
+    [ ! -f "$region_request_file" ] || action_count=$((action_count + 1))
+    [ ! -f "$repeat_region_request_file" ] || action_count=$((action_count + 1))
+    [ "$action_count" -le 1 ] || fail "the picker produced conflicting actions"
+
+    validated_file=$runtime_dir/validated
+    if [ -f "$result_file" ]; then
+        if "$python_bin" "$protocol_helper" validate --file "$result_file" >"$validated_file"; then
+            cat -- "$validated_file"
+            exit 0
+        fi
+        fail "the picker produced an invalid selection"
+    fi
+
+    if [ -f "$repeat_region_request_file" ]; then
+        if "$python_bin" "$protocol_helper" repeat-region \
+            --request "$repeat_region_request_file" >"$validated_file"; then
+            cat -- "$validated_file"
+            exit 0
+        fi
+        recovery=1
+        continue
+    fi
+
+    if [ ! -f "$region_request_file" ]; then
+        # Explicit picker cancellation intentionally emits nothing.
+        exit 1
+    fi
+
     [ "$slurp_available" -eq 1 ] || fail "slurp is required for region selection"
-    timeout --signal=TERM --kill-after=2s "${timeout_seconds}s" \
+    remaining=$(remaining_time)
+    "$python_bin" -c 'import sys; raise SystemExit(0 if float(sys.argv[1]) > 0 else 1)' "$remaining" || {
+        printf '%s: picker timed out after %s seconds\n' "$PROGRAM" "$timeout_seconds" >&2
+        exit 124
+    }
+    timeout --signal=TERM --kill-after=2s "${remaining}s" \
         "$slurp_bin" -f '%o %x %y %w %h' >"$slurp_output_file" 2>>"$log_file" &
     child_pid=$!
     slurp_status=0
@@ -224,33 +279,35 @@ if [ -f "$region_request_file" ]; then
     fi
     child_pid=
 
-    if [ "$slurp_status" -eq 0 ]; then
-        validated_file=$runtime_dir/validated
-        if "$python_bin" "$protocol_helper" region \
-            --request "$region_request_file" --selection "$slurp_output_file" >"$validated_file"; then
-            cat -- "$validated_file"
-            exit 0
-        fi
-        fail "slurp produced an invalid region"
+    if [ "$slurp_status" -eq 1 ]; then
+        allow_token=$("$python_bin" -c '
+import json, sys
+value = json.load(open(sys.argv[1], encoding="utf-8")).get("allowRestore")
+if not isinstance(value, bool):
+    raise SystemExit(2)
+print(1 if value else 0)
+' "$region_request_file") || fail "the picker produced an invalid region request"
+        export QSP_ALLOW_TOKEN=$allow_token
+        recovery=1
+        continue
     fi
     if [ "$slurp_status" -eq 124 ]; then
-        printf '%s: region selection timed out after %s seconds\n' "$PROGRAM" "$timeout_seconds" >&2
+        printf '%s: picker timed out after %s seconds\n' "$PROGRAM" "$timeout_seconds" >&2
         exit 124
     fi
-    # slurp cancellation intentionally emits nothing.
-    exit 1
-fi
+    if [ "$slurp_status" -ne 0 ]; then
+        printf '%s: slurp exited with status %s\n' "$PROGRAM" "$slurp_status" >&2
+        exit "$slurp_status"
+    fi
 
-# Cancellation intentionally emits nothing. A timeout or abnormal qs exit gets
-# a concise stderr diagnostic while preserving an empty stdout stream.
-if [ "$qs_status" -eq 124 ]; then
-    printf '%s: picker timed out after %s seconds\n' "$PROGRAM" "$timeout_seconds" >&2
-    tail -n 20 "$log_file" >&2 2>/dev/null || true
-    exit 124
-fi
-if [ "$qs_status" -ne 0 ]; then
-    printf '%s: Quickshell exited with status %s\n' "$PROGRAM" "$qs_status" >&2
-    tail -n 20 "$log_file" >&2 2>/dev/null || true
-    exit "$qs_status"
-fi
-exit 1
+    if "$python_bin" "$protocol_helper" region \
+        --request "$region_request_file" --selection "$slurp_output_file" >"$validated_file"; then
+        if ! "$python_bin" "$protocol_helper" save-region --request "$region_request_file" \
+            --selection "$validated_file" --state "$region_state_file"; then
+            printf '%s: warning: could not save the last region\n' "$PROGRAM" >&2
+        fi
+        cat -- "$validated_file"
+        exit 0
+    fi
+    fail "slurp produced an invalid region"
+done

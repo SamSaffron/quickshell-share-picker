@@ -11,6 +11,13 @@ All notable changes to this project are documented here. The format follows
 - `--test-live` launches the real picker from a source checkout or installed
   binary using current Hyprland windows and real ScreencopyView previews, without
   requiring an active XDPH request.
+- Keyboard-first list focus, Enter-to-share, tab shortcuts, inline filtering,
+  workspace grouping, stable interaction ordering, and richer preview metadata.
+- Focused-monitor placement and preselection with transient physical-output
+  identification overlays for multi-display setups.
+- Wrapper-driven region cancellation recovery and a strictly validated,
+  geometry-aware Repeat last region action.
+- Opt-in `QSP_THEME=dark` palette.
 
 ### Changed
 
@@ -29,6 +36,8 @@ All notable changes to this project are documented here. The format follows
   of the immediate unbounded native tooltip.
 - Screen and window lists reserve a slim gutter for their scrollbars so titles
   and selection highlights never render underneath them.
+- Tabs now use larger 48-pixel hit targets with explicit hover and selected-fill
+  states, without a heavy accent outline.
 
 ### Fixed
 

@@ -3,26 +3,36 @@ pragma ComponentBehavior: Bound
 import Quickshell
 import Quickshell.Wayland
 
-// PanelWindow is provided dynamically by Quickshell's active layer-shell backend.
-// qmllint disable uncreatable-type
-PanelWindow {
-    id: surface
+Scope {
+    id: root
 
-    color: content.backgroundColor
-    visible: content.windowModelReady
-    implicitWidth: content.preferredWidth
-    implicitHeight: content.preferredHeight
-    exclusiveZone: 0
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "quickshell-share-picker"
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    // PanelWindow is provided dynamically by Quickshell's active layer-shell backend.
+    // qmllint disable uncreatable-type
+    PanelWindow {
+        id: surface
 
-    PickerWindow {
-        id: content
+        color: content.backgroundColor
+        screen: content.preferredScreen
+        visible: content.windowModelReady && content.preferredScreen !== null
+        implicitWidth: content.preferredWidth
+        implicitHeight: content.preferredHeight
+        exclusiveZone: 0
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.namespace: "quickshell-share-picker"
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
 
-        anchors.fill: parent
-        hostWindow: surface
+        PickerWindow {
+            id: content
+
+            anchors.fill: parent
+            hostWindow: surface
+        }
+
+        onClosed: content.cancel()
     }
 
-    onClosed: content.cancel()
+    ScreenIdentificationOverlay {
+        targetScreen: content.identificationVisible ? content.identificationScreen : null
+        label: content.identificationLabel
+    }
 }

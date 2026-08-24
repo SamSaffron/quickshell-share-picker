@@ -35,7 +35,47 @@ case ${QSP_FAKE_MODE:-success} in
         printf '%s\n' '[SELECTION]/window:1' >"$QSP_RESULT_FILE"
         ;;
     region-request)
-        printf '%s\n' '{"allowRestore":true,"screens":[{"height":1440,"name":"DP-1","width":2560,"x":0,"y":0}]}' >"$QSP_REGION_REQUEST_FILE"
+        if [ "${QSP_REGION_RECOVERY:-0}" != 1 ]; then
+            printf '%s\n' '{"allowRestore":true,"screens":[{"height":1440,"name":"DP-1","width":2560,"x":0,"y":0}]}' >"$QSP_REGION_REQUEST_FILE"
+        fi
+        ;;
+    region-recovery)
+        if [ "${QSP_REGION_RECOVERY:-0}" = 1 ]; then
+            printf '%s\n' '[SELECTION]/window:17' >"$QSP_RESULT_FILE"
+        else
+            printf '%s\n' '{"allowRestore":true,"screens":[{"height":1440,"name":"DP-1","width":2560,"x":0,"y":0}]}' >"$QSP_REGION_REQUEST_FILE"
+        fi
+        ;;
+    region-recovery-token)
+        if [ "${QSP_REGION_RECOVERY:-0}" = 1 ]; then
+            if [ "${QSP_ALLOW_TOKEN:-1}" = 0 ]; then
+                printf '%s\n' '[SELECTION]/window:17' >"$QSP_RESULT_FILE"
+            else
+                printf '%s\n' '[SELECTION]r/window:17' >"$QSP_RESULT_FILE"
+            fi
+        else
+            printf '%s\n' '{"allowRestore":false,"screens":[{"height":1440,"name":"DP-1","width":2560,"x":0,"y":0}]}' >"$QSP_REGION_REQUEST_FILE"
+        fi
+        ;;
+    repeat-region)
+        "$QSP_PYTHON_BIN" - "$QSP_SESSION_FILE" "$QSP_REPEAT_REGION_REQUEST_FILE" <<'PY'
+import json
+import sys
+
+session = json.load(open(sys.argv[1], encoding="utf-8"))
+request = {
+    "allowRestore": False,
+    "region": session["lastRegion"],
+    "screens": [{"height": 1440, "name": "DP-1", "width": 2560, "x": 0, "y": 0}],
+}
+with open(sys.argv[2], "w", encoding="utf-8") as stream:
+    json.dump(request, stream)
+    stream.write("\n")
+PY
+        ;;
+    conflicting-actions)
+        printf '%s\n' '[SELECTION]/window:17' >"$QSP_RESULT_FILE"
+        printf '%s\n' '{"allowRestore":true,"screens":[]}' >"$QSP_REGION_REQUEST_FILE"
         ;;
     cancel)
         ;;

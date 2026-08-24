@@ -10,7 +10,7 @@ PYTHON ?= python3
 QMLLINT ?= $(shell if test -x /usr/lib/qt6/bin/qmllint; then printf '%s' /usr/lib/qt6/bin/qmllint; else command -v qmllint 2>/dev/null; fi)
 
 SHELL_FILES := bin/quickshell-share-picker scripts/create-dist scripts/offscreen-smoke scripts/run-mock tests/helpers/fake-qs tests/helpers/fake-slurp
-QML_FILES := src/quickshell/PickerPanelWindow.qml src/quickshell/PickerSmokeWindow.qml src/quickshell/PickerWindow.qml src/quickshell/shell.qml
+QML_FILES := src/quickshell/PickerPanelWindow.qml src/quickshell/PickerSmokeWindow.qml src/quickshell/PickerWindow.qml src/quickshell/ScreenIdentificationOverlay.qml src/quickshell/shell.qml
 
 .PHONY: all check clean dist format format-check install lint lint-qml lint-shell smoke test uninstall
 
@@ -60,6 +60,7 @@ install:
 	install -Dm644 src/quickshell/PickerPanelWindow.qml "$(SHAREDIR)/quickshell/PickerPanelWindow.qml"
 	install -Dm644 src/quickshell/PickerSmokeWindow.qml "$(SHAREDIR)/quickshell/PickerSmokeWindow.qml"
 	install -Dm644 src/quickshell/PickerWindow.qml "$(SHAREDIR)/quickshell/PickerWindow.qml"
+	install -Dm644 src/quickshell/ScreenIdentificationOverlay.qml "$(SHAREDIR)/quickshell/ScreenIdentificationOverlay.qml"
 	install -Dm644 src/lib/protocol.py "$(SHAREDIR)/lib/protocol.py"
 	install -Dm644 src/fixtures/mock-session.json "$(SHAREDIR)/fixtures/mock-session.json"
 	install -Dm644 README.md "$(DOCDIR)/README.md"

@@ -80,6 +80,42 @@ class RegionTests(unittest.TestCase):
     def test_resolve_region_rejects_selection_outside_output(self) -> None:
         with self.assertRaises(protocol.ProtocolError):
             protocol.resolve_region(self.REQUEST, "HDMI-A-1 -1930 200 300 400\n")
+    def test_saved_region_round_trip_and_repeat(self) -> None:
+        request = {
+            "allowRestore": False,
+            "screens": [
+                {"height": 1080, "name": "HDMI-A-1", "width": 1920, "x": -1920, "y": 180}
+            ],
+        }
+        selection = "[SELECTION]r/region:HDMI-A-1@20,20,300,400\n"
+        state = protocol.region_state_from_selection(request, selection)
+        self.assertEqual(state["outputWidth"], 1920)
+        self.assertEqual(state["outputHeight"], 1080)
+        self.assertEqual(
+            protocol.repeat_region({**request, "region": state}),
+            "[SELECTION]/region:HDMI-A-1@20,20,300,400\n",
+        )
+
+    def test_repeat_rejects_changed_output_geometry(self) -> None:
+        state = {
+            "version": 1,
+            "output": "HDMI-A-1",
+            "outputWidth": 1920,
+            "outputHeight": 1080,
+            "x": 20,
+            "y": 20,
+            "width": 300,
+            "height": 400,
+        }
+        request = {
+            "allowRestore": True,
+            "region": state,
+            "screens": [
+                {"height": 1080, "name": "HDMI-A-1", "width": 1280, "x": 0, "y": 0}
+            ],
+        }
+        with self.assertRaises(protocol.ProtocolError):
+            protocol.repeat_region(request)
 
 
 class SelectionTests(unittest.TestCase):

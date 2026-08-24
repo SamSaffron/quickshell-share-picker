@@ -234,9 +234,7 @@ def validate_selection(data: str) -> str:
     return data
 
 
-def resolve_region(request: Any, selection: str) -> str:
-    """Convert one slurp selection using private screen geometry from QML."""
-
+def _region_screens(request: Any) -> tuple[bool, dict[str, tuple[int, int, int, int]]]:
     if not isinstance(request, dict) or not isinstance(request.get("allowRestore"), bool):
         raise ProtocolError("region request is malformed")
     screens = request.get("screens")
@@ -252,6 +250,7 @@ def resolve_region(request: Any, selection: str) -> str:
         if (
             not isinstance(name, str)
             or not name
+            or "@" in name
             or any(ord(char) < 0x20 or ord(char) == 0x7F for char in name)
             or any(not isinstance(value, int) or isinstance(value, bool) for value in dimensions)
             or dimensions[2] <= 0
@@ -260,6 +259,82 @@ def resolve_region(request: Any, selection: str) -> str:
         ):
             raise ProtocolError("region request screen is malformed")
         valid_screens[name] = tuple(dimensions)
+    return request["allowRestore"], valid_screens
+
+
+def validate_region_state(value: Any) -> dict[str, Any]:
+    fields = {"version", "output", "outputWidth", "outputHeight", "x", "y", "width", "height"}
+    if not isinstance(value, dict) or set(value) != fields or value.get("version") != 1:
+        raise ProtocolError("saved region is malformed")
+    output = value.get("output")
+    numbers = [value.get(key) for key in ("outputWidth", "outputHeight", "x", "y", "width", "height")]
+    if (
+        not isinstance(output, str)
+        or not output
+        or "@" in output
+        or any(ord(char) < 0x20 or ord(char) == 0x7F for char in output)
+        or any(not isinstance(number, int) or isinstance(number, bool) for number in numbers)
+    ):
+        raise ProtocolError("saved region is malformed")
+    output_width, output_height, x, y, width, height = numbers
+    if (
+        output_width <= 0
+        or output_height <= 0
+        or x < 0
+        or y < 0
+        or width <= 0
+        or height <= 0
+        or x + width > output_width
+        or y + height > output_height
+    ):
+        raise ProtocolError("saved region is outside its output")
+    return {key: value[key] for key in sorted(fields)}
+
+
+def region_state_from_selection(request: Any, selection: str) -> dict[str, Any]:
+    _allow_restore, screens = _region_screens(request)
+    line = validate_selection(selection)
+    match = _SELECTION_RE.fullmatch(line)
+    if match is None or match.group("kind") != "region":
+        raise ProtocolError("selection is not a region")
+    region = _REGION_RE.fullmatch(match.group("payload"))
+    if region is None or region.group("output") not in screens:
+        raise ProtocolError("region output is unknown")
+    output = region.group("output")
+    _screen_x, _screen_y, output_width, output_height = screens[output]
+    return validate_region_state(
+        {
+            "version": 1,
+            "output": output,
+            "outputWidth": output_width,
+            "outputHeight": output_height,
+            "x": int(region.group("x")),
+            "y": int(region.group("y")),
+            "width": int(region.group("w")),
+            "height": int(region.group("h")),
+        }
+    )
+
+
+def repeat_region(request: Any) -> str:
+    allow_restore, screens = _region_screens(request)
+    state = validate_region_state(request.get("region"))
+    output = state["output"]
+    if output not in screens:
+        raise ProtocolError("saved region output is unavailable")
+    _screen_x, _screen_y, screen_width, screen_height = screens[output]
+    if state["outputWidth"] != screen_width or state["outputHeight"] != screen_height:
+        raise ProtocolError("saved region output geometry changed")
+    flags = "r" if allow_restore else ""
+    return validate_selection(
+        f"[SELECTION]{flags}/region:{output}@{state['x']},{state['y']},{state['width']},{state['height']}\n"
+    )
+
+
+def resolve_region(request: Any, selection: str) -> str:
+    """Convert one slurp selection using private screen geometry from QML."""
+
+    allow_restore, valid_screens = _region_screens(request)
 
     match = _SLURP_RE.fullmatch(selection)
     if match is None:
@@ -283,7 +358,7 @@ def resolve_region(request: Any, selection: str) -> str:
     ):
         raise ProtocolError("slurp selection is outside its output")
 
-    flags = "r" if request["allowRestore"] else ""
+    flags = "r" if allow_restore else ""
     return f"[SELECTION]{flags}/region:{output}@{x},{y},{width},{height}\n"
 
 
@@ -303,9 +378,22 @@ def _load_fixture(path: str | None) -> dict[str, Any] | None:
     return value
 
 
+def _load_region_state(path: str | None) -> dict[str, Any] | None:
+    if not path:
+        return None
+    state_path = Path(path)
+    try:
+        if state_path.is_symlink() or not state_path.is_file() or state_path.stat().st_size > 4096:
+            return None
+        return validate_region_state(_load_json_file(path, "saved region"))
+    except (OSError, ProtocolError):
+        return None
+
+
 def command_prepare(arguments: argparse.Namespace) -> int:
     fixture = _load_fixture(arguments.fixture)
     session = build_session(os.environ.get("XDPH_WINDOW_SHARING_LIST"), fixture)
+    session["lastRegion"] = _load_region_state(arguments.region_state)
     atomic_write_json(Path(arguments.output), session)
     return 0
 
@@ -329,6 +417,22 @@ def command_region(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def command_repeat_region(arguments: argparse.Namespace) -> int:
+    request = _load_json_file(arguments.request, "repeat-region request")
+    sys.stdout.write(repeat_region(request))
+    return 0
+
+
+def command_save_region(arguments: argparse.Namespace) -> int:
+    request = _load_json_file(arguments.request, "region request")
+    try:
+        selection = Path(arguments.selection).read_text(encoding="utf-8")
+    except OSError as error:
+        raise ProtocolError(f"cannot read region selection: {error}") from error
+    atomic_write_json(Path(arguments.state), region_state_from_selection(request, selection))
+    return 0
+
+
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -336,6 +440,7 @@ def make_parser() -> argparse.ArgumentParser:
     prepare = subparsers.add_parser("prepare", help="write picker session JSON")
     prepare.add_argument("--output", required=True)
     prepare.add_argument("--fixture")
+    prepare.add_argument("--region-state")
     prepare.set_defaults(handler=command_prepare)
 
     validate = subparsers.add_parser("validate", help="validate and print a picker result")
@@ -346,6 +451,16 @@ def make_parser() -> argparse.ArgumentParser:
     region.add_argument("--request", required=True)
     region.add_argument("--selection", required=True)
     region.set_defaults(handler=command_region)
+
+    repeat_region_parser = subparsers.add_parser("repeat-region", help="resolve a saved region request")
+    repeat_region_parser.add_argument("--request", required=True)
+    repeat_region_parser.set_defaults(handler=command_repeat_region)
+
+    save_region = subparsers.add_parser("save-region", help="persist a validated region selection")
+    save_region.add_argument("--request", required=True)
+    save_region.add_argument("--selection", required=True)
+    save_region.add_argument("--state", required=True)
+    save_region.set_defaults(handler=command_save_region)
     return parser
 
 

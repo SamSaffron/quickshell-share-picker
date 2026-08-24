@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -98,6 +99,12 @@ class WrapperTests(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertIn("invalid selection", result.stderr)
 
+    def test_conflicting_picker_actions_are_rejected(self) -> None:
+        result = self.run_picker(mode="conflicting-actions")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("conflicting actions", result.stderr)
+
     def test_quickshell_failure_is_reported_only_on_stderr(self) -> None:
         result = self.run_picker(mode="failure")
         self.assertEqual(result.returncode, 42)
@@ -114,6 +121,28 @@ class WrapperTests(unittest.TestCase):
         result = self.run_picker(mode="region-request")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "[SELECTION]r/region:DP-1@10,20,30,40\n")
+        state = json.loads((self.state / "last-region.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            state,
+            {
+                "height": 40,
+                "output": "DP-1",
+                "outputHeight": 1440,
+                "outputWidth": 2560,
+                "version": 1,
+                "width": 30,
+                "x": 10,
+                "y": 20,
+            },
+        )
+        self.assertEqual((self.state / "last-region.json").stat().st_mode & 0o777, 0o600)
+
+    def test_repeat_last_region_skips_slurp_and_uses_current_token_choice(self) -> None:
+        first = self.run_picker(mode="region-request")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        repeated = self.run_picker(mode="repeat-region")
+        self.assertEqual(repeated.returncode, 0, repeated.stderr)
+        self.assertEqual(repeated.stdout, "[SELECTION]/region:DP-1@10,20,30,40\n")
 
     def test_region_slurp_cancellation_has_empty_stdout(self) -> None:
         environment = self.picker_environment("region-request")
@@ -128,6 +157,34 @@ class WrapperTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, "")
+
+    def test_region_cancellation_reopens_picker_and_can_select_window(self) -> None:
+        environment = self.picker_environment("region-recovery")
+        environment["QSP_FAKE_SLURP_MODE"] = "cancel"
+        result = subprocess.run(
+            [str(WRAPPER)],
+            check=False,
+            capture_output=True,
+            env=environment,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "[SELECTION]/window:17\n")
+
+    def test_region_recovery_preserves_unchecked_restore_token(self) -> None:
+        environment = self.picker_environment("region-recovery-token")
+        environment["QSP_FAKE_SLURP_MODE"] = "cancel"
+        result = subprocess.run(
+            [str(WRAPPER)],
+            check=False,
+            capture_output=True,
+            env=environment,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "[SELECTION]/window:17\n")
 
     def test_live_test_uses_runtime_toplevel_mode_without_portal_windows(self) -> None:
         result = self.run_picker("--test-live", mode="live-test")
