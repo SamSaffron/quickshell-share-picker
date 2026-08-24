@@ -7,14 +7,19 @@ SHAREDIR := $(DESTDIR)$(PREFIX)/share/$(PROJECT)
 DOCDIR := $(DESTDIR)$(PREFIX)/share/doc/$(PROJECT)
 BINDIR := $(DESTDIR)$(PREFIX)/bin
 PYTHON ?= python3
+AUR_REPO ?= ../$(PROJECT)-aur
+AUR_FLAGS ?=
 QMLLINT ?= $(shell if test -x /usr/lib/qt6/bin/qmllint; then printf '%s' /usr/lib/qt6/bin/qmllint; else command -v qmllint 2>/dev/null; fi)
 
 SHELL_FILES := aur/quickshell-share-picker.install bin/quickshell-share-picker scripts/create-dist scripts/offscreen-smoke scripts/run-mock tests/helpers/fake-qs tests/helpers/fake-slurp
 QML_FILES := src/quickshell/PickerPanelWindow.qml src/quickshell/PickerSmokeWindow.qml src/quickshell/PickerWindow.qml src/quickshell/ScreenIdentificationOverlay.qml src/quickshell/shell.qml
 
-.PHONY: all check clean dist format format-check install lint lint-qml lint-shell smoke test uninstall
+.PHONY: all aur check clean dist format format-check install lint lint-qml lint-shell smoke test uninstall
 
 all: check
+
+aur:
+	$(PYTHON) scripts/publish-aur --repo "$(AUR_REPO)" $(AUR_FLAGS)
 
 check: format-check lint test smoke
 

@@ -74,9 +74,26 @@ The script prompts once, then:
    compares both archives byte-for-byte, and creates the annotated tag.
 4. Pushes `main` and the tag and uploads the exact archive with GitHub CLI.
 5. Replaces the fail-closed AUR checksum, regenerates `.SRCINFO`, builds and tests
-   the published Arch package, commits the finalized metadata, and pushes it.
+   the published Arch package, and commits and pushes the finalized metadata to
+   this repository's `main` branch.
+6. Publishes the finalized metadata to the AUR with:
 
-Use `--yes` for non-interactive automation. The same workflow is split into
+   ```sh
+   make aur
+   ```
+
+`make aur` defaults to the sibling `../quickshell-share-picker-aur` clone. It
+verifies the published source checksum and `.SRCINFO`, fast-forwards existing
+AUR history, and prompts once. After confirmation it copies only `PKGBUILD`,
+`.SRCINFO`, and `quickshell-share-picker.install`, shows the staged summary,
+commits, and pushes AUR's `master` branch. Override the clone or skip its prompt only when intentional:
+
+```sh
+make aur AUR_REPO=/path/to/quickshell-share-picker-aur
+make aur AUR_FLAGS=--yes
+```
+
+Use `--yes` for non-interactive release automation. The same workflow is split into
 recoverable stages if a network or publishing step fails:
 
 ```sh

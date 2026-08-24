@@ -329,10 +329,16 @@ and finalized with one command:
 
 ```sh
 ./scripts/release --auto
+make aur              # publish finalized metadata through the sibling AUR clone
 ```
 
-The script chooses a minor bump when the Unreleased changelog contains feature
-or behavior sections and a patch bump when it contains only fixes/security work.
+Set `AUR_REPO=/path/to/clone` when the AUR checkout is not at
+`../quickshell-share-picker-aur`. The AUR target copies only its three source
+files, verifies the release source and metadata, prompts, commits, and pushes;
+it never copies local package archives.
+
+The release script chooses a minor bump when the Unreleased changelog contains
+feature or behavior sections and a patch bump when it contains only fixes/security work.
 Override that choice with `--bump major|minor|patch` or an explicit version.
 
 The script prompts before making commits or remote changes. Use `--yes` only for

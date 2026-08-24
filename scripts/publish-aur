@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+"""Validate and publish finalized package metadata to the AUR Git repository."""
+
+from __future__ import annotations
+
+import argparse
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+PROJECT = "quickshell-share-picker"
+AUR_FILES = ("PKGBUILD", ".SRCINFO", f"{PROJECT}.install")
+ZERO_CHECKSUM = "0" * 64
+
+
+class AurError(RuntimeError):
+    """Raised when AUR publication cannot safely continue."""
+
+
+def run(
+    *command: str,
+    cwd: Path = ROOT,
+    capture: bool = False,
+    check: bool = True,
+) -> str:
+    print("+", " ".join(command))
+    completed = subprocess.run(
+        command,
+        cwd=cwd,
+        check=False,
+        text=True,
+        capture_output=capture,
+    )
+    if check and completed.returncode != 0:
+        if capture:
+            sys.stderr.write(completed.stdout)
+            sys.stderr.write(completed.stderr)
+        raise AurError(f"command failed with status {completed.returncode}: {' '.join(command)}")
+    return completed.stdout.strip() if capture else ""
+
+
+def require_commands(*commands: str) -> None:
+    missing = [command for command in commands if shutil.which(command) is None]
+    if missing:
+        raise AurError("missing required commands: " + ", ".join(missing))
+
+
+def parse_single(pattern: str, text: str, description: str) -> str:
+    matches = re.findall(pattern, text, re.MULTILINE)
+    if len(matches) != 1:
+        raise AurError(f"expected exactly one {description}, found {len(matches)}")
+    return matches[0]
+
+
+def validate_metadata(root: Path | None = None) -> tuple[str, str]:
+    root = root or ROOT
+    aur = root / "aur"
+    missing = [name for name in AUR_FILES if not (aur / name).is_file()]
+    if missing:
+        raise AurError("missing AUR files: " + ", ".join(missing))
+
+    version = (root / "VERSION").read_text(encoding="utf-8").strip()
+    pkgbuild = (aur / "PKGBUILD").read_text(encoding="utf-8")
+    pkgver = parse_single(r"^pkgver=(.+)$", pkgbuild, "PKGBUILD pkgver")
+    pkgrel = parse_single(r"^pkgrel=(.+)$", pkgbuild, "PKGBUILD pkgrel")
+    if pkgver != version:
+        raise AurError(f"PKGBUILD version {pkgver} does not match VERSION {version}")
+    if ZERO_CHECKSUM in pkgbuild:
+        raise AurError("PKGBUILD still contains the fail-closed all-zero checksum")
+
+    srcinfo = (aur / ".SRCINFO").read_text(encoding="utf-8")
+    srcinfo_version = parse_single(r"^\s*pkgver = (.+)$", srcinfo, ".SRCINFO pkgver")
+    srcinfo_release = parse_single(r"^\s*pkgrel = (.+)$", srcinfo, ".SRCINFO pkgrel")
+    if (srcinfo_version, srcinfo_release) != (pkgver, pkgrel):
+        raise AurError(".SRCINFO version does not match PKGBUILD")
+    return pkgver, pkgrel
+
+
+def validate_remote_url(url: str) -> None:
+    patterns = (
+        f"ssh://aur@aur.archlinux.org/{PROJECT}.git",
+        f"aur@aur.archlinux.org:{PROJECT}.git",
+    )
+    if url.rstrip("/") not in patterns:
+        raise AurError(
+            f"AUR clone origin is {url!r}, expected ssh://aur@aur.archlinux.org/{PROJECT}.git"
+        )
+
+
+def copy_aur_files(source_root: Path, destination: Path) -> None:
+    for name in AUR_FILES:
+        target = destination / name
+        shutil.copyfile(source_root / "aur" / name, target)
+        target.chmod(0o644)
+
+
+def verify_package_sources(source_root: Path | None = None) -> None:
+    source_root = source_root or ROOT
+    with tempfile.TemporaryDirectory(prefix=f"{PROJECT}-aur-verify-") as directory:
+        staging = Path(directory)
+        copy_aur_files(source_root, staging)
+        generated = run("makepkg", "--printsrcinfo", cwd=staging, capture=True) + "\n"
+        expected = (staging / ".SRCINFO").read_text(encoding="utf-8")
+        if generated != expected:
+            raise AurError("aur/.SRCINFO is stale; regenerate it before publishing")
+        run("makepkg", "--verifysource", "--noconfirm", cwd=staging)
+
+
+def ensure_source_metadata_committed(source_root: Path | None = None) -> None:
+    source_root = source_root or ROOT
+    relative_files = [f"aur/{name}" for name in AUR_FILES]
+    status = run(
+        "git",
+        "status",
+        "--porcelain",
+        "--",
+        *relative_files,
+        cwd=source_root,
+        capture=True,
+    )
+    if status:
+        raise AurError("commit finalized AUR metadata before publishing:\n" + status)
+
+
+def has_commit(repository: Path) -> bool:
+    completed = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        cwd=repository,
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return completed.returncode == 0
+
+
+def remote_master_exists(repository: Path) -> bool:
+    completed = subprocess.run(
+        ["git", "ls-remote", "--exit-code", "--heads", "origin", "master"],
+        cwd=repository,
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if completed.returncode not in (0, 2):
+        raise AurError("could not inspect the AUR origin")
+    return completed.returncode == 0
+
+
+def prepare_aur_repository(repository: Path) -> bool:
+    if not repository.is_dir() or not (repository / ".git").exists():
+        raise AurError(f"AUR repository is not a Git clone: {repository}")
+    remote = run("git", "remote", "get-url", "origin", cwd=repository, capture=True)
+    validate_remote_url(remote)
+    status = run("git", "status", "--porcelain", cwd=repository, capture=True)
+    if status:
+        raise AurError("AUR repository must be clean before publishing:\n" + status)
+
+    existed = remote_master_exists(repository)
+    if existed:
+        run("git", "fetch", "origin", "master", cwd=repository)
+        if not has_commit(repository):
+            raise AurError("AUR origin has history but the local clone has no checked-out commit")
+        run("git", "merge", "--ff-only", "FETCH_HEAD", cwd=repository)
+    return existed or has_commit(repository)
+
+
+def confirm(version: str, release: str, repository: Path, assume_yes: bool) -> None:
+    if assume_yes:
+        return
+    answer = input(
+        f"Publish {PROJECT} {version}-{release} to AUR from {repository}? [y/N] "
+    ).strip().lower()
+    if answer not in {"y", "yes"}:
+        raise AurError("AUR publication canceled")
+
+
+def publish(repository: Path, assume_yes: bool = False) -> None:
+    require_commands("git", "makepkg")
+    version, release = validate_metadata()
+    ensure_source_metadata_committed()
+    verify_package_sources()
+    had_history = prepare_aur_repository(repository)
+    confirm(version, release, repository, assume_yes)
+
+    copy_aur_files(ROOT, repository)
+    run("git", "add", "--", *AUR_FILES, cwd=repository)
+    run("git", "diff", "--cached", "--check", cwd=repository)
+    changed = subprocess.run(
+        ["git", "diff", "--cached", "--quiet"], cwd=repository, check=False
+    ).returncode
+    if changed == 0:
+        run("git", "push", "origin", "HEAD:master", cwd=repository)
+        print(f"AUR already has {PROJECT} {version}-{release}; nothing new to commit")
+        print(f"published: https://aur.archlinux.org/packages/{PROJECT}")
+        return
+    if changed != 1:
+        raise AurError("could not inspect staged AUR changes")
+
+    run("git", "diff", "--cached", "--stat", cwd=repository)
+    message = (
+        f"Update to {version}-{release}"
+        if had_history
+        else f"Initial import: {PROJECT} {version}-{release}"
+    )
+    run("git", "commit", "-m", message, cwd=repository)
+    run("git", "push", "origin", "HEAD:master", cwd=repository)
+    print(f"published: https://aur.archlinux.org/packages/{PROJECT}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--repo",
+        type=Path,
+        default=ROOT.parent / f"{PROJECT}-aur",
+        help="local AUR Git clone (default: sibling quickshell-share-picker-aur)",
+    )
+    parser.add_argument("--yes", action="store_true", help="publish without confirmation")
+    arguments = parser.parse_args(argv)
+    publish(arguments.repo.expanduser().resolve(), arguments.yes)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (OSError, AurError) as error:
+        print(f"aur: {error}", file=sys.stderr)
+        raise SystemExit(1) from None

@@ -34,6 +34,7 @@ TEXT_NAMES = {
     "NOTICE",
     "PKGBUILD",
     "README.md",
+    "publish-aur",
     "quickshell-share-picker-setup",
     "release",
     "SECURITY.md",

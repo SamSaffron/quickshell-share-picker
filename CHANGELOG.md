@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The release workflow now includes `make aur`, which safely verifies and copies
+  finalized metadata into a local AUR clone, commits it, and pushes AUR's master
+  branch instead of stopping after updating this repository.
+
 ## [0.2.1] - 2026-08-24
 
 ### Fixed
