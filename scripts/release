@@ -1,0 +1,402 @@
+#!/usr/bin/env python3
+"""Prepare, publish, and finalize quickshell-share-picker releases."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from datetime import date
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+PROJECT = "quickshell-share-picker"
+ZERO_CHECKSUM = "0" * 64
+RELEASE_FILES = [
+    "VERSION",
+    "README.md",
+    "CHANGELOG.md",
+    "aur/PKGBUILD",
+    "aur/.SRCINFO",
+]
+
+
+class ReleaseError(RuntimeError):
+    """Raised when a release operation cannot safely continue."""
+
+
+def run(
+    *command: str,
+    cwd: Path = ROOT,
+    env: dict[str, str] | None = None,
+    capture: bool = False,
+) -> str:
+    print("+", " ".join(command))
+    completed = subprocess.run(
+        command,
+        cwd=cwd,
+        env=env,
+        check=False,
+        text=True,
+        capture_output=capture,
+    )
+    if completed.returncode != 0:
+        if capture:
+            sys.stderr.write(completed.stdout)
+            sys.stderr.write(completed.stderr)
+        raise ReleaseError(f"command failed with status {completed.returncode}: {' '.join(command)}")
+    return completed.stdout.strip() if capture else ""
+
+
+def require_commands(*commands: str) -> None:
+    missing = [command for command in commands if shutil.which(command) is None]
+    if missing:
+        raise ReleaseError("missing required commands: " + ", ".join(missing))
+
+
+def parse_version(value: str) -> tuple[int, int, int]:
+    match = re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", value)
+    if match is None:
+        raise ReleaseError("version must use MAJOR.MINOR.PATCH form")
+    return tuple(int(part) for part in match.groups())  # type: ignore[return-value]
+
+
+def next_version(kind: str, version: str | None = None) -> str:
+    current = parse_version(version or current_version())
+    major, minor, patch = current
+    if kind == "major":
+        return f"{major + 1}.0.0"
+    if kind == "minor":
+        return f"{major}.{minor + 1}.0"
+    return f"{major}.{minor}.{patch + 1}"
+
+
+def suggested_bump() -> str:
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    match = re.search(r"(?ms)^## \[Unreleased\]\n(?P<body>.*?)(?=^## \[|\Z)", text)
+    if match is None or not match.group("body").strip():
+        raise ReleaseError("CHANGELOG.md has no Unreleased changes to version")
+    headings = set(re.findall(r"(?m)^### ([A-Za-z]+)\s*$", match.group("body")))
+    if headings & {"Added", "Changed", "Removed", "Deprecated"}:
+        return "minor"
+    if headings & {"Fixed", "Security"}:
+        return "patch"
+    raise ReleaseError("cannot infer a version bump from the Unreleased changelog sections")
+
+
+def current_version() -> str:
+    return (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+
+
+def ensure_clean_tree() -> None:
+    status = run("git", "status", "--porcelain", capture=True)
+    if status:
+        raise ReleaseError(
+            "the working tree must be clean before releasing; commit or stash these changes:\n"
+            + status
+        )
+
+
+def ensure_main_branch() -> None:
+    branch = run("git", "branch", "--show-current", capture=True)
+    if branch != "main":
+        raise ReleaseError(f"releases must run from main, not {branch or 'detached HEAD'}")
+
+
+def replace_exact(text: str, old: str, new: str, description: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise ReleaseError(f"expected exactly one {description}, found {count}")
+    return text.replace(old, new)
+
+
+def update_readme(old_version: str, new_version: str) -> None:
+    path = ROOT / "README.md"
+    text = path.read_text(encoding="utf-8")
+    text = replace_exact(
+        text,
+        f"The current public release is **v{old_version}**.",
+        f"The current public release is **v{new_version}**.",
+        "README current-release line",
+    )
+    text = replace_exact(
+        text,
+        f"The v{old_version} recipe is pinned",
+        f"The v{new_version} recipe is pinned",
+        "README Arch recipe version",
+    )
+    path.write_text(text, encoding="utf-8")
+
+
+def update_changelog(old_version: str, new_version: str) -> None:
+    path = ROOT / "CHANGELOG.md"
+    text = path.read_text(encoding="utf-8")
+    marker = "## [Unreleased]\n"
+    text = replace_exact(
+        text,
+        marker,
+        marker + f"\n## [{new_version}] - {date.today().isoformat()}\n",
+        "Unreleased changelog heading",
+    )
+    old_unreleased = (
+        f"[Unreleased]: https://github.com/sam-saffron-jarvis/{PROJECT}/compare/"
+        f"v{old_version}...HEAD"
+    )
+    new_links = (
+        f"[Unreleased]: https://github.com/sam-saffron-jarvis/{PROJECT}/compare/"
+        f"v{new_version}...HEAD\n"
+        f"[{new_version}]: https://github.com/sam-saffron-jarvis/{PROJECT}/compare/"
+        f"v{old_version}...v{new_version}"
+    )
+    text = replace_exact(text, old_unreleased, new_links, "Unreleased comparison link")
+    path.write_text(text, encoding="utf-8")
+
+
+def update_pkgbuild(new_version: str) -> None:
+    path = ROOT / "aur/PKGBUILD"
+    text = path.read_text(encoding="utf-8")
+    text, version_count = re.subn(r"(?m)^pkgver=.*$", f"pkgver={new_version}", text)
+    text, release_count = re.subn(r"(?m)^pkgrel=.*$", "pkgrel=1", text)
+    if version_count != 1 or release_count != 1:
+        raise ReleaseError("could not update exactly one pkgver and pkgrel in aur/PKGBUILD")
+    text = re.sub(r"(?m)^# Fail closed until the v.* release asset is published and verified\.\n", "", text)
+    checksum_pattern = r"(?m)^sha256sums=\('[0-9a-f]{64}'\)$"
+    replacement = (
+        f"# Fail closed until the v{new_version} release asset is published and verified.\n"
+        f"sha256sums=('{ZERO_CHECKSUM}')"
+    )
+    text, checksum_count = re.subn(checksum_pattern, replacement, text)
+    if checksum_count != 1:
+        raise ReleaseError("could not replace the PKGBUILD checksum")
+    path.write_text(text, encoding="utf-8")
+
+
+def regenerate_srcinfo() -> None:
+    output = run("makepkg", "--printsrcinfo", cwd=ROOT / "aur", capture=True)
+    (ROOT / "aur/.SRCINFO").write_text(output + "\n", encoding="utf-8")
+
+
+def required_checks() -> None:
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "REQUIRE_QMLLINT": "1",
+            "REQUIRE_QS": "1",
+            "REQUIRE_SHELLCHECK": "1",
+        }
+    )
+    run("make", "format")
+    run("make", "check", env=environment)
+    run("git", "diff", "--check")
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_reproducible_archive(version: str) -> Path:
+    epoch = run("git", "show", "-s", "--format=%ct", "HEAD", capture=True)
+    environment = os.environ.copy()
+    environment["SOURCE_DATE_EPOCH"] = epoch
+    archive = ROOT / f"dist/{PROJECT}-{version}.tar.gz"
+
+    run("make", "clean")
+    run("make", "dist", env=environment)
+    first_hash = sha256(archive)
+    with tempfile.TemporaryDirectory(prefix=f"{PROJECT}-release-") as directory:
+        first_archive = Path(directory) / archive.name
+        shutil.copy2(archive, first_archive)
+        run("make", "clean")
+        run("make", "dist", env=environment)
+        second_hash = sha256(archive)
+        if first_hash != second_hash or first_archive.read_bytes() != archive.read_bytes():
+            raise ReleaseError("release archives are not reproducible")
+    print(f"reproducible archive sha256: {second_hash}  {archive.relative_to(ROOT)}")
+    return archive
+
+
+def prepare(version: str) -> None:
+    require_commands("git", "make", "makepkg", "qmllint", "qs", "shellcheck")
+    ensure_clean_tree()
+    ensure_main_branch()
+    old_version = current_version()
+    if parse_version(version) <= parse_version(old_version):
+        raise ReleaseError(f"new version {version} must be greater than {old_version}")
+    if run("git", "tag", "--list", f"v{version}", capture=True):
+        raise ReleaseError(f"tag v{version} already exists")
+
+    (ROOT / "VERSION").write_text(version + "\n", encoding="utf-8")
+    update_readme(old_version, version)
+    update_changelog(old_version, version)
+    update_pkgbuild(version)
+    regenerate_srcinfo()
+    required_checks()
+
+    run("git", "add", *RELEASE_FILES)
+    run("git", "commit", "-m", f"Prepare v{version}")
+    build_reproducible_archive(version)
+    run("git", "tag", "-a", f"v{version}", "-m", f"{PROJECT} v{version}")
+    print(f"prepared v{version}; tag and archive remain local until publish")
+
+
+def publish(version: str) -> None:
+    require_commands("git", "gh")
+    ensure_clean_tree()
+    ensure_main_branch()
+    if current_version() != version:
+        raise ReleaseError(f"VERSION is {current_version()}, not {version}")
+    tag_commit = run("git", "rev-list", "-n", "1", f"v{version}", capture=True)
+    head_commit = run("git", "rev-parse", "HEAD", capture=True)
+    if tag_commit != head_commit:
+        raise ReleaseError(f"tag v{version} does not point at HEAD")
+    archive = ROOT / f"dist/{PROJECT}-{version}.tar.gz"
+    if not archive.is_file():
+        build_reproducible_archive(version)
+
+    run("git", "push", "origin", "main")
+    run("git", "push", "origin", f"v{version}")
+    existing = subprocess.run(
+        ["gh", "release", "view", f"v{version}"],
+        cwd=ROOT,
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if existing.returncode == 0:
+        raise ReleaseError(f"GitHub release v{version} already exists")
+    run(
+        "gh",
+        "release",
+        "create",
+        f"v{version}",
+        str(archive),
+        "--title",
+        f"{PROJECT} v{version}",
+        "--generate-notes",
+    )
+    print(f"published v{version} and uploaded {archive.name}")
+
+
+def clean_arch_artifacts() -> None:
+    for directory in (ROOT / "aur/src", ROOT / "aur/pkg"):
+        shutil.rmtree(directory, ignore_errors=True)
+    for pattern in ("*.tar.gz", "*.pkg.tar.*"):
+        for path in (ROOT / "aur").glob(pattern):
+            path.unlink(missing_ok=True)
+
+
+def finalize(version: str) -> None:
+    require_commands("git", "gh", "makepkg", "updpkgsums")
+    ensure_clean_tree()
+    ensure_main_branch()
+    if current_version() != version:
+        raise ReleaseError(f"VERSION is {current_version()}, not {version}")
+    release = subprocess.run(
+        ["gh", "release", "view", f"v{version}"],
+        cwd=ROOT,
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if release.returncode != 0:
+        raise ReleaseError(f"GitHub release v{version} is not available")
+
+    try:
+        run("updpkgsums", "PKGBUILD", cwd=ROOT / "aur")
+        pkgbuild_path = ROOT / "aur/PKGBUILD"
+        pkgbuild_text = pkgbuild_path.read_text(encoding="utf-8")
+        pkgbuild_text = re.sub(
+            r"(?m)^# Fail closed until the v.* release asset is published and verified\.\n",
+            "",
+            pkgbuild_text,
+        )
+        pkgbuild_path.write_text(pkgbuild_text, encoding="utf-8")
+        regenerate_srcinfo()
+        checksum_text = pkgbuild_path.read_text(encoding="utf-8")
+        if ZERO_CHECKSUM in checksum_text:
+            raise ReleaseError("AUR checksum remained at the fail-closed value")
+        run("makepkg", "--syncdeps", "--cleanbuild", "--noconfirm", cwd=ROOT / "aur")
+    finally:
+        clean_arch_artifacts()
+
+    run("git", "add", "aur/PKGBUILD", "aur/.SRCINFO")
+    run("git", "commit", "-m", f"Finalize v{version} AUR metadata")
+    run("git", "push", "origin", "main")
+    print(f"finalized and pushed AUR metadata for v{version}")
+
+
+def confirm(mode: str, version: str, assume_yes: bool) -> None:
+    if assume_yes:
+        return
+    effects = {
+        "prepare": "modify release files, run checks, commit, build twice, and create a local tag",
+        "publish": "push main and the tag, then create a GitHub release",
+        "finalize": "download the release, build its Arch package, commit metadata, and push main",
+        "auto": "prepare, commit, tag, push, publish, build the Arch package, and push finalized metadata",
+    }
+    answer = input(f"Release v{version} will {effects[mode]}. Continue? [y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        raise ReleaseError("release canceled")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Automate quickshell-share-picker versioning and releases.",
+        epilog="Use individual stages to recover safely if --auto stops after publishing.",
+    )
+    modes = parser.add_mutually_exclusive_group(required=True)
+    modes.add_argument("--auto", action="store_true", help="run prepare, publish, and finalize")
+    modes.add_argument("--prepare", action="store_true", help="prepare, verify, commit, archive, and tag")
+    modes.add_argument("--publish", action="store_true", help="push and create the GitHub release")
+    modes.add_argument("--finalize", action="store_true", help="finalize, test, commit, and push AUR metadata")
+    parser.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
+    parser.add_argument(
+        "--bump",
+        choices=("major", "minor", "patch"),
+        help="override the changelog-based automatic bump",
+    )
+    parser.add_argument(
+        "version",
+        nargs="?",
+        help="explicit MAJOR.MINOR.PATCH version; omitted versions are selected automatically",
+    )
+    arguments = parser.parse_args()
+
+    mode = next(name for name in ("auto", "prepare", "publish", "finalize") if getattr(arguments, name))
+    if arguments.version and arguments.bump:
+        parser.error("version and --bump are mutually exclusive")
+    if arguments.version:
+        version = arguments.version
+        parse_version(version)
+    elif mode in {"publish", "finalize"}:
+        version = current_version()
+    else:
+        bump = arguments.bump or suggested_bump()
+        version = next_version(bump)
+        print(f"selected {bump} release v{version} from CHANGELOG.md")
+    confirm(mode, version, arguments.yes)
+
+    if mode in {"auto", "prepare"}:
+        prepare(version)
+    if mode in {"auto", "publish"}:
+        publish(version)
+    if mode in {"auto", "finalize"}:
+        finalize(version)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (OSError, ReleaseError) as error:
+        print(f"release: {error}", file=sys.stderr)
+        raise SystemExit(1) from None

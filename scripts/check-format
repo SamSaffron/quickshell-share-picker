@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED_PARTS = {".git", ".pytest_cache", "__pycache__", "dist"}
 TEXT_SUFFIXES = {
     ".editorconfig",
+    ".install",
     ".json",
     ".md",
     ".py",
@@ -33,6 +34,8 @@ TEXT_NAMES = {
     "NOTICE",
     "PKGBUILD",
     "README.md",
+    "quickshell-share-picker-setup",
+    "release",
     "SECURITY.md",
     "VERSION",
 }
@@ -62,7 +65,7 @@ def validate_syntax(path: Path, text: str) -> list[str]:
     try:
         if path.suffix == ".json":
             json.loads(text)
-        elif path.suffix == ".py":
+        elif path.suffix == ".py" or text.startswith("#!/usr/bin/env python3\n"):
             ast.parse(text, filename=str(path))
     except (json.JSONDecodeError, SyntaxError) as error:
         errors.append(f"{path.relative_to(ROOT)}: {error}")

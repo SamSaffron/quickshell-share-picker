@@ -3,6 +3,7 @@ pkgbase = quickshell-share-picker
 	pkgver = 0.1.2
 	pkgrel = 2
 	url = https://github.com/sam-saffron-jarvis/quickshell-share-picker
+	install = quickshell-share-picker.install
 	arch = any
 	license = MIT
 	checkdepends = shellcheck

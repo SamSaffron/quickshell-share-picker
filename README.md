@@ -128,6 +128,7 @@ make install DESTDIR="$PWD/pkgroot" PREFIX=/usr
 Installed files are under:
 
 - `/usr/bin/quickshell-share-picker`
+- `/usr/bin/quickshell-share-picker-setup`
 - `/usr/share/quickshell-share-picker/`
 - `/usr/share/doc/quickshell-share-picker/`
 
@@ -139,7 +140,36 @@ sudo make uninstall
 
 ## Configure XDPH
 
-Add this to `~/.config/hypr/xdph.conf`:
+Configure the portal as your desktop user (not with `sudo`):
+
+```sh
+quickshell-share-picker-setup install
+```
+
+The helper appends a clearly marked block to
+`${XDG_CONFIG_HOME:-$HOME/.config}/hypr/xdph.conf`, preserving all unrelated
+settings. It is safe to run repeatedly, writes atomically, and retains the
+original file as `xdph.conf.bak` before its first change. If another picker is
+already configured outside the managed block, setup refuses to override it
+unless you review the conflict and rerun with `--force`.
+
+An interactive install offers to restart XDPH. Restarting interrupts active
+portal sessions, so non-interactive use leaves that step to you unless
+`--restart` is explicit:
+
+```sh
+quickshell-share-picker-setup check
+quickshell-share-picker-setup install --restart
+quickshell-share-picker-setup uninstall
+```
+
+`check` exits with status 0 when the managed configuration and installed picker
+are ready, 1 when setup is needed, and 2 for an invalid or unreadable config.
+Use `print` to inspect the managed block and `install --dry-run` to preview the
+complete resulting file. `uninstall` removes only the managed block; it never
+restores the backup over later user changes.
+
+For manual configuration, add this equivalent block to `~/.config/hypr/xdph.conf`:
 
 ```ini
 screencopy {
@@ -162,8 +192,8 @@ To expose the checkbox, add `XDPH_PICKER_ALLOW_TOKEN_SELECTION=1` to the
 xdg-desktop-portal-hyprland service environment. For example, use a systemd user
 service override appropriate to the local setup, then restart the service.
 
-Restart the portal after changing its configuration (this interrupts active
-portal sessions):
+After changing the configuration manually, restart the portal (this interrupts
+active portal sessions):
 
 ```sh
 systemctl --user restart xdg-desktop-portal-hyprland.service
@@ -214,6 +244,15 @@ cd aur
 makepkg -si
 ```
 
+Pacman prints the one remaining user-scoped setup command after installation:
+
+```sh
+quickshell-share-picker-setup install
+```
+
+The package does not edit a home directory from its root package transaction.
+Run the command as the Hyprland desktop user, without `sudo`.
+
 Run `makepkg` as your normal user, not as root. Its `-s` option asks pacman to
 install missing package dependencies, and `-i` installs the completed package.
 The package explicitly uses Qt 6's `/usr/lib/qt6/bin/qmllint`; this avoids the
@@ -259,13 +298,8 @@ removal use normal package-management commands. Do not commit the generated
 `dist/` archive or `*.pkg.tar.zst` package.
 
 The v0.1.2 recipe is pinned to the published release asset and its SHA-256.
-Validate future release updates with:
-
-```sh
-updpkgsums aur/PKGBUILD
-(cd aur && makepkg --printsrcinfo > .SRCINFO)
-(cd aur && makepkg -si)
-```
+Maintainers update, verify, publish, and finalize future versions with the release
+automation documented below and in `CONTRIBUTING.md`.
 
 A `-git` PKGBUILD is not included because this small release-oriented project
 gains no concrete benefit from one.
@@ -286,6 +320,25 @@ make dist            # deterministic release archive in dist/
 
 Require optional tools explicitly in automation with `REQUIRE_SHELLCHECK=1`,
 `REQUIRE_QMLLINT=1`, or `REQUIRE_QS=1`.
+
+### Release maintainers
+
+After installing `github-cli`, `pacman-contrib`, and the Arch/development tools,
+a clean `main` branch can be versioned, verified, tagged, published, packaged,
+and finalized with one command:
+
+```sh
+./scripts/release --auto
+```
+
+The script chooses a minor bump when the Unreleased changelog contains feature
+or behavior sections and a patch bump when it contains only fixes/security work.
+Override that choice with `--bump major|minor|patch` or an explicit version.
+
+The script prompts before making commits or remote changes. Use `--yes` only for
+intentional non-interactive automation. If publishing is interrupted, resume the
+same version with `--prepare`, `--publish`, or `--finalize`; see
+`CONTRIBUTING.md` for the exact stage behavior and safety checks.
 
 The mock launcher still needs `qs` and a Qt platform on which to display the
 window, but it does not query Hyprland or require the XDPH environment. Window

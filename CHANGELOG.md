@@ -18,6 +18,14 @@ All notable changes to this project are documented here. The format follows
 - Wrapper-driven region cancellation recovery and a strictly validated,
   geometry-aware Repeat last region action.
 - Opt-in `QSP_THEME=dark` palette.
+- `scripts/release` automatically selects the next semantic version from the
+  Unreleased changelog, provides staged `--prepare`, `--publish`, and `--finalize`
+  recovery, and offers a one-command `--auto` workflow with required checks,
+  reproducibility verification, GitHub publishing, and Arch finalization.
+- `quickshell-share-picker-setup` safely installs, checks, previews, and removes
+  a user-scoped managed XDPH configuration block, with conflict detection,
+  one-time backup, atomic writes, symlink preservation, and optional portal
+  restart. The Arch package now prints the setup command after installation.
 
 ### Changed
 

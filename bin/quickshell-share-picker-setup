@@ -1,0 +1,374 @@
+#!/usr/bin/env python3
+"""Safely configure xdg-desktop-portal-hyprland for quickshell-share-picker."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+PROGRAM = "quickshell-share-picker-setup"
+DEFAULT_PICKER = "/usr/bin/quickshell-share-picker"
+BEGIN_MARKER = (
+    "# BEGIN quickshell-share-picker managed block "
+    "(do not edit; managed by quickshell-share-picker-setup)"
+)
+END_MARKER = "# END quickshell-share-picker managed block"
+_PICKER_RE = re.compile(
+    r"^\s*custom_picker_binary\s*=\s*(?P<value>[^#\r\n]*?)(?:\s+#.*)?\s*$"
+)
+_ALLOW_TOKEN_RE = re.compile(
+    r"^\s*allow_token_by_default\s*=\s*(?P<value>true|false)(?:\s+#.*)?\s*$",
+    re.IGNORECASE,
+)
+
+
+class SetupError(RuntimeError):
+    """Raised when setup cannot safely continue."""
+
+
+def newline_style(text: str) -> str:
+    first_lf = text.find("\n")
+    if first_lf > 0 and text[first_lf - 1] == "\r":
+        return "\r\n"
+    return "\n"
+
+
+def render_block(picker: str = DEFAULT_PICKER, newline: str = "\n") -> str:
+    lines = [
+        BEGIN_MARKER,
+        "screencopy {",
+        f"    custom_picker_binary = {picker}",
+        "    allow_token_by_default = true",
+        "}",
+        END_MARKER,
+    ]
+    return newline.join(lines) + newline
+
+
+def marker_span(text: str) -> tuple[int, int] | None:
+    lines = text.splitlines(keepends=True)
+    begin_indexes = [index for index, line in enumerate(lines) if line.rstrip("\r\n") == BEGIN_MARKER]
+    end_indexes = [index for index, line in enumerate(lines) if line.rstrip("\r\n") == END_MARKER]
+    if not begin_indexes and not end_indexes:
+        return None
+    if len(begin_indexes) != 1 or len(end_indexes) != 1 or end_indexes[0] < begin_indexes[0]:
+        raise SetupError("xdph.conf contains malformed or duplicate managed-block markers")
+    start = sum(len(line) for line in lines[: begin_indexes[0]])
+    end = sum(len(line) for line in lines[: end_indexes[0] + 1])
+    return start, end
+
+
+def without_managed_block(text: str) -> str:
+    span = marker_span(text)
+    if span is None:
+        return text
+    return text[: span[0]] + text[span[1] :]
+
+
+def picker_assignments(text: str) -> list[str]:
+    assignments: list[str] = []
+    for line in without_managed_block(text).splitlines():
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = _PICKER_RE.fullmatch(line)
+        if match:
+            value = match.group("value").strip().strip('"').strip("'")
+            assignments.append(value)
+    return assignments
+
+
+def install_content(text: str, picker: str = DEFAULT_PICKER) -> str:
+    newline = newline_style(text)
+    block = render_block(picker, newline)
+    span = marker_span(text)
+    if span is not None and not text[span[1] :].strip():
+        return text[: span[0]] + block + text[span[1] :]
+    if span is not None:
+        text = without_managed_block(text)
+    if not text:
+        return block
+    separator = "" if text.endswith(("\n", "\r")) else newline
+    return text + separator + block
+
+
+def uninstall_content(text: str) -> str:
+    span = marker_span(text)
+    if span is None:
+        return text
+    return text[: span[0]] + text[span[1] :]
+
+
+def effective_picker(text: str) -> str | None:
+    result: str | None = None
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = _PICKER_RE.fullmatch(line)
+        if match:
+            result = match.group("value").strip().strip('"').strip("'")
+    return result
+
+
+def effective_allow_token(text: str) -> bool | None:
+    result: bool | None = None
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = _ALLOW_TOKEN_RE.fullmatch(line)
+        if match:
+            result = match.group("value").lower() == "true"
+    return result
+
+
+def default_config_path() -> Path:
+    config_home = os.environ.get("XDG_CONFIG_HOME")
+    if config_home:
+        return Path(config_home).expanduser() / "hypr/xdph.conf"
+    home = os.environ.get("HOME")
+    if not home:
+        raise SetupError("HOME and XDG_CONFIG_HOME are both unset")
+    return Path(home).expanduser() / ".config/hypr/xdph.conf"
+
+
+def read_config(path: Path) -> str:
+    if not os.path.lexists(path):
+        return ""
+    target = path.resolve(strict=True)
+    mode = target.stat().st_mode
+    if not stat.S_ISREG(mode):
+        raise SetupError(f"configuration target is not a regular file: {target}")
+    try:
+        return target.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise SetupError(f"configuration is not valid UTF-8: {error}") from error
+
+
+def atomic_write(path: Path, text: str) -> None:
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if path.is_symlink():
+        target = path.resolve(strict=True)
+    else:
+        target = path
+    if target.exists() and not stat.S_ISREG(target.stat().st_mode):
+        raise SetupError(f"configuration target is not a regular file: {target}")
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else 0o644
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+    temporary_path = Path(temporary)
+    try:
+        os.fchmod(descriptor, mode)
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, target)
+        directory_descriptor = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def backup_config(path: Path) -> Path | None:
+    if not os.path.lexists(path):
+        return None
+    backup = path.with_name(path.name + ".bak")
+    if os.path.lexists(backup):
+        backup_target = backup.resolve(strict=True)
+        if not stat.S_ISREG(backup_target.stat().st_mode):
+            raise SetupError(f"backup target is not a regular file: {backup_target}")
+        return backup
+    source_mode = stat.S_IMODE(path.resolve(strict=True).stat().st_mode)
+    backup.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, source_mode)
+    try:
+        with os.fdopen(descriptor, "wb") as destination, path.open("rb") as source:
+            shutil.copyfileobj(source, destination)
+            destination.flush()
+            os.fsync(destination.fileno())
+        directory_descriptor = os.open(backup.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    except BaseException:
+        backup.unlink(missing_ok=True)
+        raise
+    return backup
+
+
+def refuse_root() -> None:
+    if os.geteuid() == 0:
+        raise SetupError(f"do not run {PROGRAM} as root; run it as the Hyprland desktop user")
+
+
+def restart_portal() -> None:
+    completed = subprocess.run(
+        ["systemctl", "--user", "restart", "xdg-desktop-portal-hyprland.service"],
+        check=False,
+        text=True,
+    )
+    if completed.returncode != 0:
+        print(
+            f"{PROGRAM}: warning: portal restart failed; restart "
+            "xdg-desktop-portal-hyprland manually",
+            file=sys.stderr,
+        )
+
+
+def should_restart(arguments: argparse.Namespace, changed: bool) -> bool:
+    if not changed or arguments.no_restart:
+        return False
+    if arguments.restart:
+        return True
+    if arguments.yes or not sys.stdin.isatty():
+        return False
+    answer = input(
+        "Restart xdg-desktop-portal-hyprland now? "
+        "This interrupts active shares. [y/N] "
+    ).strip().lower()
+    return answer in {"y", "yes"}
+
+
+def check_configuration(path: Path, picker: str) -> int:
+    try:
+        text = read_config(path)
+        span = marker_span(text)
+    except (OSError, SetupError) as error:
+        print(f"error: {error}")
+        return 2
+    issues: list[str] = []
+    if span is None:
+        issues.append("managed block is not installed")
+    else:
+        expected = render_block(picker, newline_style(text))
+        if text[span[0] : span[1]] != expected:
+            issues.append("managed block differs from the expected configuration")
+    selected = effective_picker(text)
+    if selected != picker:
+        issues.append(f"effective custom picker is {selected or 'not configured'}")
+    if effective_allow_token(text) is not True:
+        issues.append("effective allow_token_by_default is not true")
+    picker_path = Path(picker)
+    if not picker_path.is_file() or not os.access(picker_path, os.X_OK):
+        issues.append(f"picker binary is missing or not executable: {picker}")
+    if issues:
+        print(f"XDPH configuration: {path}")
+        for issue in issues:
+            print(f"- {issue}")
+        return 1
+    print(f"configured: {path}")
+    print(f"custom picker: {picker}")
+    return 0
+
+
+def install(arguments: argparse.Namespace) -> int:
+    refuse_root()
+    path = arguments.config
+    text = read_config(path)
+    foreign = [value for value in picker_assignments(text) if value != arguments.picker]
+    if foreign and not arguments.force:
+        raise SetupError(
+            "another custom_picker_binary is configured outside the managed block: "
+            + ", ".join(foreign)
+            + "; rerun with --force to append an overriding managed block"
+        )
+    updated = install_content(text, arguments.picker)
+    changed = updated != text
+    if arguments.dry_run:
+        sys.stdout.write(updated)
+        return 0
+    if changed:
+        backup = backup_config(path)
+        atomic_write(path, updated)
+        print(f"configured: {path}")
+        if backup:
+            print(f"backup: {backup}")
+    else:
+        print(f"already configured: {path}")
+    if should_restart(arguments, changed):
+        restart_portal()
+    elif changed:
+        print("restart the portal when convenient:")
+        print("  systemctl --user restart xdg-desktop-portal-hyprland.service")
+    return 0
+
+
+def uninstall(arguments: argparse.Namespace) -> int:
+    refuse_root()
+    path = arguments.config
+    text = read_config(path)
+    updated = uninstall_content(text)
+    changed = updated != text
+    if arguments.dry_run:
+        sys.stdout.write(updated)
+        return 0
+    if changed:
+        backup = backup_config(path)
+        atomic_write(path, updated)
+        print(f"removed managed configuration: {path}")
+        if backup:
+            print(f"backup: {backup}")
+    else:
+        print(f"managed configuration is not installed: {path}")
+    if should_restart(arguments, changed):
+        restart_portal()
+    elif changed:
+        print("restart the portal when convenient:")
+        print("  systemctl --user restart xdg-desktop-portal-hyprland.service")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, default=None, help="override the xdph.conf path")
+    parser.add_argument("--picker", default=DEFAULT_PICKER, help="override the picker binary path")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    subparsers.add_parser("check", help="report whether XDPH is configured")
+    subparsers.add_parser("print", help="print the managed configuration block")
+    for command in ("install", "uninstall"):
+        action = subparsers.add_parser(command, help=f"{command} the managed configuration")
+        action.add_argument("--yes", action="store_true", help="disable interactive prompts")
+        restart = action.add_mutually_exclusive_group()
+        restart.add_argument("--restart", action="store_true", help="restart XDPH after a change")
+        restart.add_argument("--no-restart", action="store_true", help="do not offer to restart XDPH")
+        action.add_argument("--dry-run", action="store_true", help="print the resulting file without writing")
+        if command == "install":
+            action.add_argument("--force", action="store_true", help="override another configured picker")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    arguments = parser.parse_args(argv)
+    arguments.config = arguments.config or default_config_path()
+    if arguments.command == "print":
+        sys.stdout.write(render_block(arguments.picker))
+        return 0
+    if arguments.command == "check":
+        return check_configuration(arguments.config, arguments.picker)
+    if arguments.command == "install":
+        return install(arguments)
+    return uninstall(arguments)
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (OSError, SetupError) as error:
+        print(f"{PROGRAM}: {error}", file=sys.stderr)
+        raise SystemExit(2) from None

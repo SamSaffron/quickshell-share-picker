@@ -9,7 +9,7 @@ BINDIR := $(DESTDIR)$(PREFIX)/bin
 PYTHON ?= python3
 QMLLINT ?= $(shell if test -x /usr/lib/qt6/bin/qmllint; then printf '%s' /usr/lib/qt6/bin/qmllint; else command -v qmllint 2>/dev/null; fi)
 
-SHELL_FILES := bin/quickshell-share-picker scripts/create-dist scripts/offscreen-smoke scripts/run-mock tests/helpers/fake-qs tests/helpers/fake-slurp
+SHELL_FILES := aur/quickshell-share-picker.install bin/quickshell-share-picker scripts/create-dist scripts/offscreen-smoke scripts/run-mock tests/helpers/fake-qs tests/helpers/fake-slurp
 QML_FILES := src/quickshell/PickerPanelWindow.qml src/quickshell/PickerSmokeWindow.qml src/quickshell/PickerWindow.qml src/quickshell/ScreenIdentificationOverlay.qml src/quickshell/shell.qml
 
 .PHONY: all check clean dist format format-check install lint lint-qml lint-shell smoke test uninstall
@@ -56,6 +56,7 @@ dist: format-check
 
 install:
 	install -Dm755 bin/quickshell-share-picker "$(BINDIR)/quickshell-share-picker"
+	install -Dm755 bin/quickshell-share-picker-setup "$(BINDIR)/quickshell-share-picker-setup"
 	install -Dm644 src/quickshell/shell.qml "$(SHAREDIR)/quickshell/shell.qml"
 	install -Dm644 src/quickshell/PickerPanelWindow.qml "$(SHAREDIR)/quickshell/PickerPanelWindow.qml"
 	install -Dm644 src/quickshell/PickerSmokeWindow.qml "$(SHAREDIR)/quickshell/PickerSmokeWindow.qml"
@@ -69,7 +70,7 @@ install:
 	install -Dm644 NOTICE "$(DOCDIR)/NOTICE"
 
 uninstall:
-	rm -f "$(BINDIR)/quickshell-share-picker"
+	rm -f "$(BINDIR)/quickshell-share-picker" "$(BINDIR)/quickshell-share-picker-setup"
 	rm -rf "$(SHAREDIR)" "$(DOCDIR)"
 
 clean:

@@ -44,15 +44,48 @@ environment records.
 Commits should be small and use imperative summaries. Pull requests should
 explain the behavior change, tests run, and any protocol or packaging impact.
 
-## Release checklist
+## Release automation
 
-Maintainers should:
+Install the maintainer tools (`github-cli`, `pacman-contrib`, `base-devel`, and
+the development dependencies above), commit all intended changes, and start from
+a clean `main` branch. A complete release is then one command:
 
-1. Confirm `VERSION`, `CHANGELOG.md`, `aur/PKGBUILD`, and `aur/.SRCINFO` agree.
-2. Run all checks, including required shellcheck and qmllint.
-3. Build twice with the same `SOURCE_DATE_EPOCH` and compare SHA-256 hashes.
-4. Tag `v<VERSION>` and upload the exact `make dist` archive.
-5. Replace the AUR's all-zero checksum using `updpkgsums`, regenerate
-   `.SRCINFO`, and test `makepkg` before publishing it.
+```sh
+./scripts/release --auto
+```
 
-Do not commit generated `dist/` archives.
+The script inspects the `Unreleased` changelog sections and selects the next
+version automatically: `Added`, `Changed`, `Removed`, or `Deprecated` changes
+produce a minor bump, while a release containing only `Fixed` or `Security`
+changes produces a patch bump. Use `--bump major|minor|patch` or an explicit
+version only when overriding that decision:
+
+```sh
+./scripts/release --auto --bump major
+./scripts/release --auto 1.0.0
+```
+
+The script prompts once, then:
+
+1. Updates `VERSION`, README release references, `CHANGELOG.md`, `aur/PKGBUILD`,
+   and `aur/.SRCINFO`.
+2. Runs formatting and all required checks.
+3. Commits `Prepare v<VERSION>`, builds twice with one `SOURCE_DATE_EPOCH`,
+   compares both archives byte-for-byte, and creates the annotated tag.
+4. Pushes `main` and the tag and uploads the exact archive with GitHub CLI.
+5. Replaces the fail-closed AUR checksum, regenerates `.SRCINFO`, builds and tests
+   the published Arch package, commits the finalized metadata, and pushes it.
+
+Use `--yes` for non-interactive automation. The same workflow is split into
+recoverable stages if a network or publishing step fails:
+
+```sh
+./scripts/release --prepare
+./scripts/release --publish
+./scripts/release --finalize
+```
+
+The script refuses dirty trees, non-`main` branches, malformed/non-increasing
+versions, existing tags, missing tools, non-reproducible archives, unavailable
+GitHub releases, and all-zero finalized checksums. Do not commit generated
+`dist/` archives or Arch build artifacts.
