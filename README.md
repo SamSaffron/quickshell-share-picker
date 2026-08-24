@@ -220,8 +220,7 @@ Install the runtime dependencies using the package source appropriate for your
 system, for example:
 
 ```sh
-sudo pacman -S python coreutils quickshell
-# Optional: slurp for Region; xdg-desktop-portal-hyprland for portal use
+sudo pacman -S python coreutils quickshell slurp xdg-desktop-portal-hyprland
 ```
 
 The `aur/PKGBUILD` is for a versioned release asset, not a moving `-git`
@@ -229,8 +228,9 @@ package. Its unversioned `quickshell` dependency is deliberate: Arch's
 `quickshell-git` currently provides `quickshell` without a version, so a
 versioned dependency would incorrectly reject that compatible provider. The
 runtime minimum remains Quickshell 0.3.1. `slurp` and
-`xdg-desktop-portal-hyprland` are optional dependencies because screen/window
-selection and direct mock use do not require them. The package's `check()` runs
+`xdg-desktop-portal-hyprland` are required package dependencies: XDPH provides
+the portal integration this picker targets, and `slurp` keeps the primary Region
+action functional after a normal installation. The package's `check()` runs
 the complete headless suite, including the real-QML offscreen smoke.
 
 ### Build and install the published Arch package

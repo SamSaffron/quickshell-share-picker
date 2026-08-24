@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows
 - The release workflow now includes `make aur`, which safely verifies and copies
   finalized metadata into a local AUR clone, commits it, and pushes AUR's master
   branch instead of stopping after updating this repository.
+- The Arch package now requires `slurp` and `xdg-desktop-portal-hyprland`, so a
+  standard installation includes working Region selection and XDPH integration.
 
 ## [0.2.1] - 2026-08-24
 
