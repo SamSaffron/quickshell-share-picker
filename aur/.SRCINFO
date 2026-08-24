@@ -1,6 +1,6 @@
 pkgbase = quickshell-share-picker
 	pkgdesc = Quickshell screencast source picker for xdg-desktop-portal-hyprland
-	pkgver = 0.2.0
+	pkgver = 0.2.1
 	pkgrel = 1
 	url = https://github.com/sam-saffron-jarvis/quickshell-share-picker
 	install = quickshell-share-picker.install
@@ -13,7 +13,7 @@ pkgbase = quickshell-share-picker
 	depends = quickshell
 	optdepends = slurp: region selection
 	optdepends = xdg-desktop-portal-hyprland: portal integration
-	source = quickshell-share-picker-0.2.0.tar.gz::https://github.com/sam-saffron-jarvis/quickshell-share-picker/releases/download/v0.2.0/quickshell-share-picker-0.2.0.tar.gz
-	sha256sums = 15a42acba546366c33f46a395ea44151e5a2991864ca5d7561fb1ca468ea80d6
+	source = quickshell-share-picker-0.2.1.tar.gz::https://github.com/sam-saffron-jarvis/quickshell-share-picker/releases/download/v0.2.1/quickshell-share-picker-0.2.1.tar.gz
+	sha256sums = 0000000000000000000000000000000000000000000000000000000000000000
 
 pkgname = quickshell-share-picker

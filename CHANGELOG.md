@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-24
+
 ### Fixed
 
 - Up and Down now move the selected window while the slash-activated filter
@@ -100,7 +102,8 @@ All notable changes to this project are documented here. The format follows
   deterministic release archives, and an Arch release-package template.
 - XDPH/BSD attribution and implementation notes for selected-window previews.
 
-[Unreleased]: https://github.com/sam-saffron-jarvis/quickshell-share-picker/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/sam-saffron-jarvis/quickshell-share-picker/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/sam-saffron-jarvis/quickshell-share-picker/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/sam-saffron-jarvis/quickshell-share-picker/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/sam-saffron-jarvis/quickshell-share-picker/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/sam-saffron-jarvis/quickshell-share-picker/compare/v0.1.0...v0.1.1

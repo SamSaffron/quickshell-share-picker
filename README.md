@@ -11,7 +11,7 @@ and keeps **Screen**, **Window**, and **Region** choices in one compact 800×500
 centered layer-shell surface. The restrained light palette is the default and
 remains consistent across desktops; an opt-in dark palette is also available.
 
-The current public release is **v0.2.0**.
+The current public release is **v0.2.1**.
 
 ## Features
 
@@ -297,7 +297,7 @@ tracks the custom build as `quickshell-share-picker`, so later upgrades and
 removal use normal package-management commands. Do not commit the generated
 `dist/` archive or `*.pkg.tar.zst` package.
 
-The v0.2.0 recipe is pinned to the published release asset and its SHA-256.
+The v0.2.1 recipe is pinned to the published release asset and its SHA-256.
 Maintainers update, verify, publish, and finalize future versions with the release
 automation documented below and in `CONTRIBUTING.md`.
 
