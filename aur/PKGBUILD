@@ -16,8 +16,7 @@ optdepends=(
   'xdg-desktop-portal-hyprland: portal integration'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
-# Fail closed until the v0.2.0 release asset is published and verified.
-sha256sums=('0000000000000000000000000000000000000000000000000000000000000000')
+sha256sums=('15a42acba546366c33f46a395ea44151e5a2991864ca5d7561fb1ca468ea80d6')
 install=quickshell-share-picker.install
 
 check() {
