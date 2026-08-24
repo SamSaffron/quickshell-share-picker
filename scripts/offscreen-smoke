@@ -29,18 +29,39 @@ temporary=$(mktemp -d "${TMPDIR:-/tmp}/$PROGRAM.XXXXXXXX")
 trap 'rm -rf -- "$temporary"' EXIT HUP INT TERM
 mkdir -m 700 "$temporary/runtime" "$temporary/state" "$temporary/data" "$temporary/cache"
 session_file=$temporary/session.json
+live_session_file=$temporary/live-session.json
+fake_slurp=$temporary/fake-slurp
+
+cat >"$fake_slurp" <<'EOF'
+#!/bin/sh
+sleep 0.2
+printf '%s\n' 'DP-1 10 20 30 40'
+EOF
+chmod 700 "$fake_slurp"
 
 XDPH_WINDOW_SHARING_LIST='17[HC>]app[HT>]Title[HE>]255[HA>]' \
     "$python_bin" "$root/src/lib/protocol.py" prepare --output "$session_file"
+"$python_bin" "$root/src/lib/protocol.py" prepare \
+    --output "$live_session_file" --fixture "$root/src/fixtures/mock-session.json"
 
 run_case() {
     name=$1
     token_selection=$2
     uncheck=$3
     expected=$4
+    live_test=${5:-0}
+    case_session=${6:-$session_file}
+    smoke_region=${7:-0}
+    if [ "$smoke_region" = 1 ]; then
+        default_tab=region
+    else
+        default_tab=window
+    fi
     case_dir=$temporary/$name
     mkdir -m 700 "$case_dir"
     result_file=$case_dir/result
+    region_request_file=$case_dir/region-request.json
+    slurp_output_file=$case_dir/slurp-output
     geometry_file=$case_dir/geometry.json
     log_file=$case_dir/quickshell.log
 
@@ -52,12 +73,17 @@ run_case() {
         QSP_ALLOW_TOKEN=1 \
         QSP_ALLOW_TOKEN_SELECTION="$token_selection" \
         QSP_GEOMETRY_FILE="$geometry_file" \
+        QSP_LIVE_TEST_MODE="$live_test" \
+        QSP_REGION_REQUEST_FILE="$region_request_file" \
         QSP_RESULT_FILE="$result_file" \
-        QSP_SESSION_FILE="$session_file" \
-        QSP_SLURP_AVAILABLE=0 \
+        QSP_SESSION_FILE="$case_session" \
+        QSP_SLURP_AVAILABLE="$smoke_region" \
+        QSP_SLURP_BIN="$fake_slurp" \
         QSP_SMOKE_MODE=1 \
+        QSP_SMOKE_REGION="$smoke_region" \
         QSP_SMOKE_UNCHECK_TOKEN="$uncheck" \
         QSP_TEST_MODE=0 \
+        XDPH_PICKER_DEFAULT_TAB="$default_tab" \
         XDG_CACHE_HOME="$temporary/cache" \
         XDG_DATA_HOME="$temporary/data" \
         XDG_RUNTIME_DIR="$temporary/runtime" \
@@ -67,6 +93,12 @@ run_case() {
         printf '%s: %s case failed\n' "$PROGRAM" "$name" >&2
         tail -n 40 "$log_file" >&2 || true
         return 1
+    fi
+
+    if [ "$smoke_region" = 1 ]; then
+        "$fake_slurp" >"$slurp_output_file"
+        "$python_bin" "$root/src/lib/protocol.py" region \
+            --request "$region_request_file" --selection "$slurp_output_file" >"$result_file"
     fi
 
     if grep -E '(^|[^[:alpha:]])(TypeError|ReferenceError):' "$log_file" >/dev/null; then
@@ -84,4 +116,6 @@ run_case() {
 run_case hidden 0 0 '[SELECTION]r/window:17'
 run_case shown-checked 1 0 '[SELECTION]r/window:17'
 run_case shown-unchecked 1 1 '[SELECTION]/window:17'
+run_case live-test 0 0 '[SELECTION]r/window:1' 1 "$live_session_file"
+run_case region 0 0 '[SELECTION]r/region:DP-1@10,20,30,40' 0 "$live_session_file" 1
 printf 'PASS real QML offscreen smoke\n'

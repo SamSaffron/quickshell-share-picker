@@ -29,6 +29,10 @@ _SELECTION_RE = re.compile(
 _REGION_RE = re.compile(
     r"(?P<output>[^@\r\n]+)@(?P<x>\d+),(?P<y>\d+),(?P<w>\d+),(?P<h>\d+)\Z"
 )
+_SLURP_RE = re.compile(
+    r"(?P<output>\S+)\s+(?P<x>-?\d+)\s+(?P<y>-?\d+)\s+"
+    r"(?P<w>\d+)\s+(?P<h>\d+)\s*\Z"
+)
 
 
 class ProtocolError(ValueError):
@@ -230,13 +234,70 @@ def validate_selection(data: str) -> str:
     return data
 
 
+def resolve_region(request: Any, selection: str) -> str:
+    """Convert one slurp selection using private screen geometry from QML."""
+
+    if not isinstance(request, dict) or not isinstance(request.get("allowRestore"), bool):
+        raise ProtocolError("region request is malformed")
+    screens = request.get("screens")
+    if not isinstance(screens, list):
+        raise ProtocolError("region request screens must be an array")
+
+    valid_screens: dict[str, tuple[int, int, int, int]] = {}
+    for screen in screens:
+        if not isinstance(screen, dict):
+            raise ProtocolError("region request screen is malformed")
+        name = screen.get("name")
+        dimensions = [screen.get(key) for key in ("x", "y", "width", "height")]
+        if (
+            not isinstance(name, str)
+            or not name
+            or any(ord(char) < 0x20 or ord(char) == 0x7F for char in name)
+            or any(not isinstance(value, int) or isinstance(value, bool) for value in dimensions)
+            or dimensions[2] <= 0
+            or dimensions[3] <= 0
+            or name in valid_screens
+        ):
+            raise ProtocolError("region request screen is malformed")
+        valid_screens[name] = tuple(dimensions)
+
+    match = _SLURP_RE.fullmatch(selection)
+    if match is None:
+        raise ProtocolError("slurp returned an unrecognized region")
+    output = match.group("output")
+    if output not in valid_screens:
+        raise ProtocolError("slurp selected an unknown output")
+
+    screen_x, screen_y, screen_width, screen_height = valid_screens[output]
+    x = int(match.group("x")) - screen_x
+    y = int(match.group("y")) - screen_y
+    width = int(match.group("w"))
+    height = int(match.group("h"))
+    if (
+        x < 0
+        or y < 0
+        or width <= 0
+        or height <= 0
+        or x + width > screen_width
+        or y + height > screen_height
+    ):
+        raise ProtocolError("slurp selection is outside its output")
+
+    flags = "r" if request["allowRestore"] else ""
+    return f"[SELECTION]{flags}/region:{output}@{x},{y},{width},{height}\n"
+
+
+def _load_json_file(path: str, description: str) -> Any:
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ProtocolError(f"cannot read {description}: {error}") from error
+
+
 def _load_fixture(path: str | None) -> dict[str, Any] | None:
     if path is None:
         return None
-    try:
-        value = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ProtocolError(f"cannot read fixture: {error}") from error
+    value = _load_json_file(path, "fixture")
     if not isinstance(value, dict):
         raise ProtocolError("fixture root must be an object")
     return value
@@ -258,6 +319,16 @@ def command_validate(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def command_region(arguments: argparse.Namespace) -> int:
+    request = _load_json_file(arguments.request, "region request")
+    try:
+        selection = Path(arguments.selection).read_text(encoding="utf-8")
+    except OSError as error:
+        raise ProtocolError(f"cannot read slurp selection: {error}") from error
+    sys.stdout.write(resolve_region(request, selection))
+    return 0
+
+
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -270,6 +341,11 @@ def make_parser() -> argparse.ArgumentParser:
     validate = subparsers.add_parser("validate", help="validate and print a picker result")
     validate.add_argument("--file", required=True)
     validate.set_defaults(handler=command_validate)
+
+    region = subparsers.add_parser("region", help="resolve a private slurp region request")
+    region.add_argument("--request", required=True)
+    region.add_argument("--selection", required=True)
+    region.set_defaults(handler=command_region)
     return parser
 
 

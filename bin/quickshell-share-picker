@@ -8,12 +8,13 @@ DEFAULT_TIMEOUT=120
 
 usage() {
     cat <<'EOF'
-Usage: quickshell-share-picker [--allow-token] [--test]
+Usage: quickshell-share-picker [--allow-token] [--test | --test-live]
 
 One-shot screencast source picker for xdg-desktop-portal-hyprland.
 
   --allow-token  Accepted for XDPH compatibility (restore tokens already default on).
   --test         Use the bundled mock session (no Hyprland data required).
+  --test-live    Use current Hyprland windows for local UI testing and previews.
   -h, --help     Show this help.
 EOF
 }
@@ -25,13 +26,19 @@ fail() {
 
 allow_token=1
 test_mode=0
+live_test_mode=0
 while [ "$#" -gt 0 ]; do
     case $1 in
         --allow-token)
             allow_token=1
             ;;
         --test)
+            [ "$live_test_mode" -eq 0 ] || fail "--test and --test-live are mutually exclusive"
             test_mode=1
+            ;;
+        --test-live)
+            [ "$test_mode" -eq 0 ] || fail "--test and --test-live are mutually exclusive"
+            live_test_mode=1
             ;;
         -h | --help)
             usage
@@ -104,11 +111,17 @@ trap 'exit 143' TERM
 
 session_file=$runtime_dir/session.json
 result_file=$runtime_dir/result
+region_request_file=$runtime_dir/region-request.json
+slurp_output_file=$runtime_dir/slurp-output
 log_file=$runtime_dir/quickshell.log
 
 if [ "$test_mode" -eq 1 ]; then
     "$python_bin" "$protocol_helper" prepare --output "$session_file" --fixture "$fixture_path" || \
         fail "failed to prepare the mock session"
+elif [ "$live_test_mode" -eq 1 ]; then
+    XDPH_WINDOW_SHARING_LIST= \
+        "$python_bin" "$protocol_helper" prepare --output "$session_file" || \
+        fail "failed to prepare the live test session"
 else
     "$python_bin" "$protocol_helper" prepare --output "$session_file" || \
         fail "failed to parse XDPH_WINDOW_SHARING_LIST"
@@ -141,7 +154,14 @@ if [ "$timeout_seconds" -lt 5 ] || [ "$timeout_seconds" -gt 600 ]; then
     fail "QSP_TIMEOUT_SECONDS must be an integer from 5 to 600"
 fi
 
-if command -v slurp >/dev/null 2>&1; then
+if [ -n "${QSP_SLURP_BIN:-}" ]; then
+    slurp_bin=$QSP_SLURP_BIN
+elif slurp_bin=$(command -v slurp 2>/dev/null); then
+    :
+else
+    slurp_bin=slurp
+fi
+if command -v "$slurp_bin" >/dev/null 2>&1; then
     slurp_available=1
 else
     slurp_available=0
@@ -155,11 +175,14 @@ fi
 
 export QSP_SESSION_FILE="$session_file"
 export QSP_RESULT_FILE="$result_file"
+export QSP_REGION_REQUEST_FILE="$region_request_file"
 export QSP_GEOMETRY_FILE="$geometry_file"
 export QSP_ALLOW_TOKEN=$allow_token
 export QSP_ALLOW_TOKEN_SELECTION=$allow_token_selection
 export QSP_TEST_MODE=$test_mode
+export QSP_LIVE_TEST_MODE=$live_test_mode
 export QSP_SLURP_AVAILABLE=$slurp_available
+export QSP_SLURP_BIN=$slurp_bin
 export QS_NO_RELOAD_POPUP=1
 
 # Quickshell's output is diagnostic, never picker protocol. Keep it away from
@@ -186,6 +209,36 @@ if [ -f "$result_file" ]; then
         exit 0
     fi
     fail "the picker produced an invalid selection"
+fi
+
+if [ -f "$region_request_file" ]; then
+    [ "$slurp_available" -eq 1 ] || fail "slurp is required for region selection"
+    timeout --signal=TERM --kill-after=2s "${timeout_seconds}s" \
+        "$slurp_bin" -f '%o %x %y %w %h' >"$slurp_output_file" 2>>"$log_file" &
+    child_pid=$!
+    slurp_status=0
+    if wait "$child_pid"; then
+        slurp_status=0
+    else
+        slurp_status=$?
+    fi
+    child_pid=
+
+    if [ "$slurp_status" -eq 0 ]; then
+        validated_file=$runtime_dir/validated
+        if "$python_bin" "$protocol_helper" region \
+            --request "$region_request_file" --selection "$slurp_output_file" >"$validated_file"; then
+            cat -- "$validated_file"
+            exit 0
+        fi
+        fail "slurp produced an invalid region"
+    fi
+    if [ "$slurp_status" -eq 124 ]; then
+        printf '%s: region selection timed out after %s seconds\n' "$PROGRAM" "$timeout_seconds" >&2
+        exit 124
+    fi
+    # slurp cancellation intentionally emits nothing.
+    exit 1
 fi
 
 # Cancellation intentionally emits nothing. A timeout or abnormal qs exit gets

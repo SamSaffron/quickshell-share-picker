@@ -12,6 +12,7 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parents[1]
 WRAPPER = REPOSITORY / "bin/quickshell-share-picker"
 FAKE_QS = REPOSITORY / "tests/helpers/fake-qs"
+FAKE_SLURP = REPOSITORY / "tests/helpers/fake-slurp"
 WINDOW_LIST = "17[HC>]app[HT>]Title[HE>]255[HA>]"
 
 
@@ -36,6 +37,7 @@ class WrapperTests(unittest.TestCase):
                 "QSP_PYTHON_BIN": sys.executable,
                 "QSP_QS_BIN": str(FAKE_QS),
                 "QSP_SHARE_DIR": str(REPOSITORY / "src"),
+                "QSP_SLURP_BIN": str(FAKE_SLURP),
                 "QSP_STATE_DIR": str(self.state),
                 "QSP_TIMEOUT_SECONDS": "5",
                 "XDG_RUNTIME_DIR": str(self.runtime),
@@ -107,6 +109,36 @@ class WrapperTests(unittest.TestCase):
         result = self.run_picker("--test")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "[SELECTION]/window:17\n")
+
+    def test_region_request_runs_slurp_after_picker_and_resolves_coordinates(self) -> None:
+        result = self.run_picker(mode="region-request")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "[SELECTION]r/region:DP-1@10,20,30,40\n")
+
+    def test_region_slurp_cancellation_has_empty_stdout(self) -> None:
+        environment = self.picker_environment("region-request")
+        environment["QSP_FAKE_SLURP_MODE"] = "cancel"
+        result = subprocess.run(
+            [str(WRAPPER)],
+            check=False,
+            capture_output=True,
+            env=environment,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+
+    def test_live_test_uses_runtime_toplevel_mode_without_portal_windows(self) -> None:
+        result = self.run_picker("--test-live", mode="live-test")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "[SELECTION]/window:1\n")
+
+    def test_fixture_and_live_test_modes_are_mutually_exclusive(self) -> None:
+        result = self.run_picker("--test", "--test-live")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("mutually exclusive", result.stderr)
 
     def test_source_tree_detection_requires_project_marker(self) -> None:
         environment = self.picker_environment("success")

@@ -6,6 +6,38 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `--test-live` launches the real picker from a source checkout or installed
+  binary using current Hyprland windows and real ScreencopyView previews, without
+  requiring an active XDPH request.
+
+### Changed
+
+- The picker now uses a centered, keyboard-focused layer-shell surface instead
+  of a normal tiled toplevel, so it opens above windows without a Hyprland rule.
+- Geometry state written by the previous toplevel implementation is ignored once
+  when migrating to the panel surface, restoring the compact 800×500 size.
+- The selected window preview refreshes once per second while visible instead of
+  remaining at its initial frame.
+- Initial toplevel association is settled before the picker appears, and unchanged
+  polling results no longer replace the list model, eliminating launch-time list
+  bouncing and scroll movement.
+- The Screen tab now mirrors the compact list-and-preview structure of the Window
+  tab, including a once-per-second preview of the selected output.
+- Elided window titles now use a delayed, size-constrained dark tooltip instead
+  of the immediate unbounded native tooltip.
+- Screen and window lists reserve a slim gutter for their scrollbars so titles
+  and selection highlights never render underneath them.
+
+### Fixed
+
+- QML lint discovery now prefers Qt 6's `qmllint` when a legacy Qt 5 tool also
+  appears on `PATH`.
+- Region selection now fully exits the focused layer-shell picker before the
+  wrapper launches `slurp`, allowing `slurp` to acquire pointer and keyboard
+  input reliably.
+
 ## [0.1.2] - 2026-08-24
 
 ### Fixed

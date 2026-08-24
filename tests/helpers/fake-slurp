@@ -1,0 +1,15 @@
+#!/bin/sh
+
+set -eu
+
+case ${QSP_FAKE_SLURP_MODE:-success} in
+    success)
+        printf '%s\n' "${QSP_FAKE_SLURP_SELECTION:-DP-1 10 20 30 40}"
+        ;;
+    cancel)
+        exit 1
+        ;;
+    *)
+        exit 64
+        ;;
+esac

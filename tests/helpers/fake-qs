@@ -25,6 +25,18 @@ case ${QSP_FAKE_MODE:-success} in
             printf '%s\n' '[SELECTION]r/window:17' >"$QSP_RESULT_FILE"
         fi
         ;;
+    live-test)
+        if [ "${QSP_LIVE_TEST_MODE:-0}" != 1 ] || [ "${QSP_TEST_MODE:-0}" != 0 ]; then
+            exit 65
+        fi
+        if ! grep -F '"windows":[]' "$QSP_SESSION_FILE" >/dev/null; then
+            exit 66
+        fi
+        printf '%s\n' '[SELECTION]/window:1' >"$QSP_RESULT_FILE"
+        ;;
+    region-request)
+        printf '%s\n' '{"allowRestore":true,"screens":[{"height":1440,"name":"DP-1","width":2560,"x":0,"y":0}]}' >"$QSP_REGION_REQUEST_FILE"
+        ;;
     cancel)
         ;;
     malformed)

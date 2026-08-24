@@ -8,8 +8,10 @@ import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 
-FloatingWindow {
+Item {
     id: picker
+
+    required property var hostWindow
 
     readonly property color backgroundColor: "#f7f7f8"
     readonly property color surfaceColor: "#ffffff"
@@ -19,6 +21,7 @@ FloatingWindow {
     readonly property color accentColor: "#2864dc"
     readonly property color selectedColor: "#e7efff"
     readonly property bool testMode: Quickshell.env("QSP_TEST_MODE") === "1"
+    readonly property bool liveTestMode: Quickshell.env("QSP_LIVE_TEST_MODE") === "1"
     readonly property bool smokeMode: Quickshell.env("QSP_SMOKE_MODE") === "1"
         && Quickshell.env("QT_QPA_PLATFORM") === "offscreen"
     readonly property bool slurpAvailable: Quickshell.env("QSP_SLURP_AVAILABLE") === "1"
@@ -27,17 +30,13 @@ FloatingWindow {
 
     property var screenEntries: []
     property var windowEntries: []
+    property bool windowModelReady: false
     property bool finalized: false
     property bool rebuilding: false
-    property string regionOutput: ""
-    property string regionError: ""
     property int rebuildAttempts: 0
 
-    title: "Select what to share"
-    color: backgroundColor
-    implicitWidth: initialWidth()
-    implicitHeight: initialHeight()
-    minimumSize: Qt.size(640, 400)
+    readonly property int preferredWidth: initialWidth()
+    readonly property int preferredHeight: initialHeight()
 
     function parseJson(text, fallback) {
         if (!text)
@@ -62,7 +61,8 @@ FloatingWindow {
     }
 
     function loadGeometry() {
-        return parseJson(geometryFile.text(), { "width": 800, "height": 500 });
+        const geometry = parseJson(geometryFile.text(), {});
+        return geometry.surface === "panel" ? geometry : { "width": 800, "height": 500 };
     }
 
     function boundedDimension(value, fallback, lower, upper) {
@@ -84,8 +84,9 @@ FloatingWindow {
 
     function saveGeometry() {
         geometryFile.setText(JSON.stringify({
-            "height": Math.round(picker.height),
-            "width": Math.round(picker.width)
+            "height": Math.round(hostWindow.height),
+            "surface": "panel",
+            "width": Math.round(hostWindow.width)
         }) + "\n");
     }
 
@@ -134,49 +135,87 @@ FloatingWindow {
         return Hyprland.focusedWorkspace ? Number(Hyprland.focusedWorkspace.id) : -1;
     }
 
+    function windowModelsEqual(left, right) {
+        if (left.length !== right.length)
+            return false;
+        for (let index = 0; index < left.length; ++index) {
+            const a = left[index];
+            const b = right[index];
+            if (a.address !== b.address || a.captureSource !== b.captureSource
+                    || a.className !== b.className || a.handle !== b.handle
+                    || a.matched !== b.matched || a.sourceIndex !== b.sourceIndex
+                    || a.title !== b.title || a.workspaceId !== b.workspaceId
+                    || a.workspaceName !== b.workspaceName
+                    || a.isCurrentWorkspace !== b.isCurrentWorkspace)
+                return false;
+        }
+        return true;
+    }
+
     function rebuildWindows() {
-        if (rebuilding)
+        if (!windowModelReady || rebuilding)
             return;
         rebuilding = true;
 
         try {
             const previous = selectedWindow();
-            const previousHandle = previous ? previous.handle : "";
+            const previousKey = previous ? (liveTestMode ? previous.address : previous.handle) : "";
             const toplevels = runtimeToplevels();
             const currentWorkspace = currentWorkspaceId();
             const result = [];
-            const portalWindows = session.windows || [];
 
-            for (let index = 0; index < portalWindows.length; ++index) {
-                const portalWindow = portalWindows[index];
-                let match = null;
-                for (let candidateIndex = 0; candidateIndex < toplevels.length; ++candidateIndex) {
-                    const candidate = toplevels[candidateIndex];
-                    if (String(candidate.address) === portalWindow.normalizedAddress) {
-                        match = candidate;
-                        break;
-                    }
+            if (liveTestMode) {
+                for (let index = 0; index < toplevels.length; ++index) {
+                    const toplevel = toplevels[index];
+                    const workspace = toplevel.workspace;
+                    const workspaceId = workspace ? Number(workspace.id) : -1;
+                    const wayland = toplevel.wayland;
+                    result.push({
+                        "address": String(toplevel.address),
+                        "captureSource": wayland || null,
+                        "className": String(wayland ? wayland.appId : ""),
+                        "handle": String(index + 1),
+                        "matched": true,
+                        "sourceIndex": index,
+                        "title": String(toplevel.title || (wayland ? wayland.title : "")),
+                        "workspaceId": workspaceId,
+                        "workspaceName": workspace ? String(workspace.name) : "",
+                        "isCurrentWorkspace": workspaceId === currentWorkspace
+                    });
                 }
+            } else {
+                const portalWindows = session.windows || [];
+                for (let index = 0; index < portalWindows.length; ++index) {
+                    const portalWindow = portalWindows[index];
+                    let match = null;
+                    for (let candidateIndex = 0; candidateIndex < toplevels.length; ++candidateIndex) {
+                        const candidate = toplevels[candidateIndex];
+                        if (String(candidate.address) === portalWindow.normalizedAddress) {
+                            match = candidate;
+                            break;
+                        }
+                    }
 
-                const workspace = match ? match.workspace : null;
-                const workspaceId = workspace ? Number(workspace.id) : -1;
-                const workspaceName = workspace ? String(workspace.name) : "";
-                let captureSource = null;
-                if (!(session.mock && session.mock.enabled) && match && match.wayland)
-                    captureSource = match.wayland;
+                    const workspace = match ? match.workspace : null;
+                    const workspaceId = workspace ? Number(workspace.id) : -1;
+                    const workspaceName = workspace ? String(workspace.name) : "";
+                    let captureSource = null;
+                    if (!(session.mock && session.mock.enabled) && match && match.wayland)
+                        captureSource = match.wayland;
 
-                result.push({
-                    "address": portalWindow.normalizedAddress,
-                    "captureSource": captureSource,
-                    "className": String(portalWindow.class || (match && match.wayland ? match.wayland.appId : "")),
-                    "handle": String(portalWindow.handle),
-                    "matched": match !== null,
-                    "sourceIndex": Number(portalWindow.sourceIndex),
-                    "title": String(portalWindow.title || (match ? match.title : "")),
-                    "workspaceId": workspaceId,
-                    "workspaceName": workspaceName,
-                    "isCurrentWorkspace": workspaceId === currentWorkspace
-                });
+                    result.push({
+                        "address": portalWindow.normalizedAddress,
+                        "captureSource": captureSource,
+                        "className": String(portalWindow.class || (match && match.wayland ? match.wayland.appId : "")),
+                        "handle": String(portalWindow.handle),
+                        "matched": match !== null,
+                        "sourceIndex": Number(portalWindow.sourceIndex),
+                        "title": String(portalWindow.title || (match ? match.title : "")),
+                        "workspaceId": workspaceId,
+                        "workspaceName": workspaceName,
+                        "isCurrentWorkspace": workspaceId === currentWorkspace
+                    });
+                }
             }
 
             result.sort((left, right) => {
@@ -187,10 +226,13 @@ FloatingWindow {
                 return left.sourceIndex - right.sourceIndex;
             });
 
+            if (windowModelsEqual(windowEntries, result))
+                return;
+
             windowEntries = result;
             let selectedIndex = result.length > 0 ? 0 : -1;
-            if (previousHandle) {
-                const preservedIndex = result.findIndex(entry => entry.handle === previousHandle);
+            if (previousKey) {
+                const preservedIndex = result.findIndex(entry => (liveTestMode ? entry.address : entry.handle) === previousKey);
                 if (preservedIndex >= 0)
                     selectedIndex = preservedIndex;
             }
@@ -244,41 +286,23 @@ FloatingWindow {
     }
 
     function selectRegion() {
-        if (!slurpAvailable || regionProcess.running)
+        if (!slurpAvailable || finalized)
             return;
-        regionError = "";
-        regionOutput = "";
-        regionProcess.running = true;
-    }
-
-    function handleRegionResult(exitCode) {
-        if (exitCode !== 0) {
-            regionError = "Region selection was cancelled.";
-            return;
-        }
-
-        const match = /^(\S+)\s+(-?\d+)\s+(-?\d+)\s+(\d+)\s+(\d+)\s*$/.exec(regionOutput);
-        if (!match) {
-            regionError = "slurp returned an unrecognized region.";
-            return;
-        }
-
-        const output = match[1];
-        const screen = screenEntries.find(entry => entry.name === output);
-        if (!screen) {
-            regionError = "The selected output is no longer available.";
-            return;
-        }
-
-        const relativeX = Number(match[2]) - screen.x;
-        const relativeY = Number(match[3]) - screen.y;
-        const width = Number(match[4]);
-        const height = Number(match[5]);
-        if (relativeX < 0 || relativeY < 0 || width <= 0 || height <= 0) {
-            regionError = "The selected region is outside its output.";
-            return;
-        }
-        finish("region:" + output + "@" + relativeX + "," + relativeY + "," + width + "," + height);
+        finalized = true;
+        saveGeometry();
+        const allowRestore = restoreToken.visible ? restoreToken.checked : true;
+        const screens = screenEntries.map(entry => ({
+            "height": entry.height,
+            "name": entry.name,
+            "width": entry.width,
+            "x": entry.x,
+            "y": entry.y
+        }));
+        regionRequestFile.setText(JSON.stringify({
+            "allowRestore": allowRestore,
+            "screens": screens
+        }) + "\n");
+        Qt.quit();
     }
 
     function shareEnabled() {
@@ -286,18 +310,36 @@ FloatingWindow {
             return selectedScreen() !== null;
         if (tabs.currentIndex === 1)
             return selectedWindow() !== null;
-        return slurpAvailable && !regionProcess.running;
+        return slurpAvailable;
     }
 
     function runSmoke() {
+        const smokeRegion = Quickshell.env("QSP_SMOKE_REGION") === "1";
         if (Quickshell.appId !== "io.github.samsaffron.quickshell-share-picker")
             throw new Error("unexpected Quickshell app ID: " + Quickshell.appId);
-        if (tabs.currentIndex !== 1)
-            throw new Error("picker did not default to the Window tab");
+        if (tabs.currentIndex !== (smokeRegion ? 2 : 1))
+            throw new Error("picker did not open on the requested tab");
         if (rebuilding)
             throw new Error("window rebuild guard remained set");
-        if (windowEntries.length !== 1 || !selectedWindow() || selectedWindow().handle !== "17")
+        if (!windowModelReady)
+            throw new Error("window model was published before it was ready");
+        const stableEntries = windowEntries;
+        rebuildWindows();
+        if (windowEntries !== stableEntries)
+            throw new Error("unchanged window model was unnecessarily replaced");
+        if (previewRefreshTimer.interval !== 1000 || !previewRefreshTimer.repeat)
+            throw new Error("selected window preview refresh timer is misconfigured");
+        if (screenPreviewRefreshTimer.interval !== 1000 || !screenPreviewRefreshTimer.repeat)
+            throw new Error("selected screen preview refresh timer is misconfigured");
+        if (screenEntries.length > 0 && screenList.currentIndex !== 0)
+            throw new Error("first screen was not selected before publication");
+        if (!smokeRegion && liveTestMode) {
+            if (windowEntries.length !== 3 || !selectedWindow()
+                    || selectedWindow().handle !== "1" || selectedWindow().address !== "abc123")
+                throw new Error("live-test toplevel rebuild did not complete");
+        } else if (!smokeRegion && (windowEntries.length !== 1 || !selectedWindow() || selectedWindow().handle !== "17")) {
             throw new Error("production window-list rebuild did not complete");
+        }
         if (restoreToken.visible !== allowTokenSelection)
             throw new Error("restore-token visibility did not follow the environment");
         if (restoreToken.visible && !restoreToken.checked)
@@ -307,24 +349,26 @@ FloatingWindow {
         shareCurrent();
     }
 
-    onClosed: cancel()
-
     Component.onCompleted: {
         rebuildScreens();
-        rebuildWindows();
         const requestedTab = String(Quickshell.env("XDPH_PICKER_DEFAULT_TAB") || "window").toLowerCase();
         tabs.currentIndex = requestedTab === "screen" ? 0 : requestedTab === "region" ? 2 : 1;
         restoreToken.checked = Quickshell.env("QSP_ALLOW_TOKEN") !== "0";
-        rebuildTimer.start();
-        if (smokeMode)
+        if (smokeMode) {
+            windowModelReady = true;
+            rebuildWindows();
             Qt.callLater(runSmoke);
+        } else {
+            initialWindowTimer.start();
+        }
     }
 
     Connections {
         target: Hyprland
 
         function onFocusedWorkspaceChanged() {
-            picker.rebuildWindows();
+            if (picker.windowModelReady)
+                picker.rebuildWindows();
         }
     }
 
@@ -332,7 +376,8 @@ FloatingWindow {
         target: Hyprland.toplevels
 
         function onValuesChanged() {
-            picker.rebuildWindows();
+            if (picker.windowModelReady)
+                picker.rebuildWindows();
         }
     }
 
@@ -352,6 +397,14 @@ FloatingWindow {
     }
 
     FileView {
+        id: regionRequestFile
+        path: String(Quickshell.env("QSP_REGION_REQUEST_FILE") || "")
+        blockWrites: true
+        atomicWrites: true
+        printErrors: false
+    }
+
+    FileView {
         id: geometryFile
         path: String(Quickshell.env("QSP_GEOMETRY_FILE") || "")
         blockLoading: true
@@ -361,28 +414,27 @@ FloatingWindow {
     }
 
     Timer {
+        id: initialWindowTimer
+        interval: 250
+        onTriggered: {
+            picker.windowModelReady = true;
+            picker.rebuildScreens();
+            picker.rebuildWindows();
+            rebuildTimer.start();
+        }
+    }
+
+    Timer {
         id: rebuildTimer
-        interval: 125
+        interval: 250
         repeat: true
         onTriggered: {
             picker.rebuildAttempts += 1;
             picker.rebuildScreens();
             picker.rebuildWindows();
-            if (picker.rebuildAttempts >= 24)
+            if (picker.rebuildAttempts >= 12)
                 stop();
         }
-    }
-
-    Process {
-        id: regionProcess
-        command: ["slurp", "-f", "%o %x %y %w %h"]
-        stdout: SplitParser {
-            onRead: data => picker.regionOutput = data
-        }
-        // Quickshell's installed qmltypes references QProcess::ExitStatus without
-        // exporting that C++ enum to qmllint; only the exit code is needed here.
-        // qmllint disable signal-handler-parameters
-        onExited: exitCode => picker.handleRegionResult(exitCode)
     }
 
     Shortcut {
@@ -467,53 +519,141 @@ FloatingWindow {
                         Layout.fillHeight: true
 
                         Item {
-                            ListView {
-                                id: screenList
+                            RowLayout {
                                 anchors.fill: parent
                                 anchors.margins: 10
-                                clip: true
-                                spacing: 3
-                                model: picker.screenEntries
-                                activeFocusOnTab: true
-                                keyNavigationEnabled: true
-                                highlightMoveDuration: 80
-                                highlight: Rectangle {
-                                    color: picker.selectedColor
-                                    border.color: picker.accentColor
+                                spacing: 10
+
+                                Rectangle {
+                                    Layout.preferredWidth: 280
+                                    Layout.minimumWidth: 220
+                                    Layout.maximumWidth: 300
+                                    Layout.fillHeight: true
+                                    color: "#fbfbfc"
+                                    border.color: picker.borderColor
                                     border.width: 1
                                     radius: 4
-                                }
 
-                                delegate: Item {
-                                    id: screenDelegate
-                                    required property var modelData
-                                    required property int index
-                                    width: ListView.view.width
-                                    height: 42
-
-                                    Text {
+                                    ListView {
+                                        id: screenList
+                                        readonly property real scrollGutter: screenScrollBar.visible ? screenScrollBar.width + 4 : 0
                                         anchors.fill: parent
-                                        anchors.leftMargin: 12
-                                        anchors.rightMargin: 12
-                                        verticalAlignment: Text.AlignVCenter
-                                        color: picker.textColor
-                                        elide: Text.ElideRight
-                                        text: "Screen " + screenDelegate.modelData.index + " at " + screenDelegate.modelData.x + ", "
-                                            + screenDelegate.modelData.y + " (" + screenDelegate.modelData.width + "x" + screenDelegate.modelData.height
-                                            + ") (" + screenDelegate.modelData.name + ")"
-                                    }
+                                        anchors.margins: 4
+                                        clip: true
+                                        spacing: 2
+                                        model: picker.screenEntries
+                                        activeFocusOnTab: true
+                                        keyNavigationEnabled: true
+                                        highlightMoveDuration: 80
+                                        highlight: Rectangle {
+                                            color: picker.selectedColor
+                                            border.color: picker.accentColor
+                                            border.width: 1
+                                            radius: 4
+                                        }
 
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: screenList.currentIndex = screenDelegate.index
-                                        onDoubleClicked: {
-                                            screenList.currentIndex = screenDelegate.index;
-                                            picker.finish("screen:" + screenDelegate.modelData.name);
+                                        delegate: Item {
+                                            id: screenDelegate
+                                            required property var modelData
+                                            required property int index
+                                            width: screenList.width - screenList.scrollGutter
+                                            height: 54
+
+                                            Column {
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                anchors.leftMargin: 12
+                                                anchors.rightMargin: 12
+                                                spacing: 2
+
+                                                Text {
+                                                    width: parent.width
+                                                    color: picker.textColor
+                                                    elide: Text.ElideRight
+                                                    font.weight: Font.DemiBold
+                                                    text: screenDelegate.modelData.name
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    color: picker.mutedTextColor
+                                                    elide: Text.ElideRight
+                                                    font.pixelSize: 12
+                                                    text: screenDelegate.modelData.width + "×" + screenDelegate.modelData.height
+                                                        + " at " + screenDelegate.modelData.x + ", " + screenDelegate.modelData.y
+                                                }
+                                            }
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: screenList.currentIndex = screenDelegate.index
+                                                onDoubleClicked: {
+                                                    screenList.currentIndex = screenDelegate.index;
+                                                    picker.finish("screen:" + screenDelegate.modelData.name);
+                                                }
+                                            }
+                                        }
+
+                                        ScrollBar.vertical: ScrollBar {
+                                            id: screenScrollBar
+                                            policy: ScrollBar.AsNeeded
+                                            width: 8
                                         }
                                     }
                                 }
 
-                                ScrollBar.vertical: ScrollBar {}
+                                Rectangle {
+                                    id: screenPreviewFrame
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    Layout.minimumWidth: 200
+                                    color: "#17191c"
+                                    radius: 4
+                                    clip: true
+
+                                    readonly property var selection: picker.selectedScreen()
+                                    readonly property real sourceRatio: screenPreview.sourceSize.height > 0
+                                        ? screenPreview.sourceSize.width / screenPreview.sourceSize.height : 1
+
+                                    ScreencopyView {
+                                        id: screenPreview
+                                        anchors.centerIn: parent
+                                        captureSource: screenPreviewFrame.selection ? screenPreviewFrame.selection.screen : null
+                                        live: false
+                                        paintCursor: false
+                                        width: hasContent ? Math.min(screenPreviewFrame.width,
+                                            screenPreviewFrame.height * screenPreviewFrame.sourceRatio) : 0
+                                        height: hasContent ? width / screenPreviewFrame.sourceRatio : 0
+                                    }
+
+                                    Timer {
+                                        id: screenPreviewRefreshTimer
+                                        interval: 1000
+                                        repeat: true
+                                        running: picker.windowModelReady && tabs.currentIndex === 0
+                                            && screenPreview.captureSource !== null
+                                        onTriggered: screenPreview.captureFrame()
+                                    }
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        width: parent.width - 40
+                                        horizontalAlignment: Text.AlignHCenter
+                                        wrapMode: Text.WordWrap
+                                        color: "#c8cbd0"
+                                        visible: !screenPreview.hasContent
+                                        text: {
+                                            if (!screenPreviewFrame.selection)
+                                                return "Select a screen to preview";
+                                            if (picker.testMode)
+                                                return "Preview unavailable in mock mode";
+                                            if (!screenPreviewFrame.selection.screen)
+                                                return "No preview available";
+                                            return "Loading preview…";
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -535,6 +675,7 @@ FloatingWindow {
 
                                     ListView {
                                         id: windowList
+                                        readonly property real scrollGutter: windowScrollBar.visible ? windowScrollBar.width + 4 : 0
                                         anchors.fill: parent
                                         anchors.margins: 4
                                         clip: true
@@ -554,7 +695,7 @@ FloatingWindow {
                                             id: windowDelegate
                                             required property var modelData
                                             required property int index
-                                            width: ListView.view.width
+                                            width: windowList.width - windowList.scrollGutter
                                             height: 46
 
                                             RowLayout {
@@ -572,6 +713,7 @@ FloatingWindow {
                                                 }
 
                                                 Text {
+                                                    id: windowTitle
                                                     Layout.fillWidth: true
                                                     color: picker.textColor
                                                     elide: Text.ElideRight
@@ -581,22 +723,76 @@ FloatingWindow {
                                             }
 
                                             MouseArea {
+                                                id: windowMouseArea
                                                 anchors.fill: parent
+                                                hoverEnabled: true
                                                 onClicked: windowList.currentIndex = windowDelegate.index
                                                 onDoubleClicked: {
                                                     windowList.currentIndex = windowDelegate.index;
                                                     picker.finish("window:" + windowDelegate.modelData.handle);
                                                 }
+                                                onContainsMouseChanged: {
+                                                    if (containsMouse && windowTitle.truncated) {
+                                                        windowToolTipDelay.restart();
+                                                    } else {
+                                                        windowToolTipDelay.stop();
+                                                        windowToolTipTimeout.stop();
+                                                        windowToolTip.visible = false;
+                                                    }
+                                                }
                                             }
 
-                                            ToolTip.visible: delegateHover.hovered
-                                            ToolTip.text: (windowDelegate.modelData.workspaceName ? "[" + windowDelegate.modelData.workspaceName + "] " : "")
-                                                + windowDelegate.modelData.className + ": " + windowDelegate.modelData.title
+                                            ToolTip {
+                                                id: windowToolTip
+                                                x: 8
+                                                y: windowDelegate.height + 4
+                                                width: Math.min(420, Math.max(220, windowTitle.implicitWidth + leftPadding + rightPadding))
+                                                padding: 8
+                                                visible: false
+                                                text: windowTitle.text
 
-                                            HoverHandler { id: delegateHover }
+                                                contentItem: Text {
+                                                    id: windowToolTipText
+                                                    width: windowToolTip.width - windowToolTip.leftPadding - windowToolTip.rightPadding
+                                                    color: "#f5f6f7"
+                                                    elide: Text.ElideRight
+                                                    maximumLineCount: 3
+                                                    wrapMode: Text.Wrap
+                                                    text: windowToolTip.text
+                                                }
+
+                                                background: Rectangle {
+                                                    color: "#2b2e33"
+                                                    border.color: "#545960"
+                                                    border.width: 1
+                                                    radius: 4
+                                                }
+                                            }
+
+                                            Timer {
+                                                id: windowToolTipDelay
+                                                interval: 650
+                                                onTriggered: {
+                                                    if (windowMouseArea.containsMouse && windowTitle.truncated) {
+                                                        windowToolTip.visible = true;
+                                                        windowToolTipTimeout.restart();
+                                                    }
+                                                }
+                                            }
+
+                                            Timer {
+                                                id: windowToolTipTimeout
+                                                interval: 5000
+                                                onTriggered: windowToolTip.visible = false
+                                            }
+
                                         }
 
-                                        ScrollBar.vertical: ScrollBar {}
+                                        ScrollBar.vertical: ScrollBar {
+                                            id: windowScrollBar
+                                            policy: ScrollBar.AsNeeded
+                                            width: 8
+                                        }
                                     }
                                 }
 
@@ -620,6 +816,15 @@ FloatingWindow {
                                         paintCursor: false
                                         width: hasContent ? Math.min(previewFrame.width, previewFrame.height * previewFrame.sourceRatio) : 0
                                         height: hasContent ? width / previewFrame.sourceRatio : 0
+                                    }
+
+                                    Timer {
+                                        id: previewRefreshTimer
+                                        interval: 1000
+                                        repeat: true
+                                        running: picker.windowModelReady && tabs.currentIndex === 1
+                                            && preview.captureSource !== null
+                                        onTriggered: preview.captureFrame()
                                     }
 
                                     Text {
@@ -653,18 +858,9 @@ FloatingWindow {
                                     id: regionButton
                                     Layout.fillWidth: true
                                     Layout.minimumHeight: 40
-                                    enabled: picker.slurpAvailable && !regionProcess.running
-                                    text: regionProcess.running ? "Selecting Region…"
-                                        : picker.slurpAvailable ? "Select Region…" : "Select Region… (slurp is not installed)"
+                                    enabled: picker.slurpAvailable
+                                    text: picker.slurpAvailable ? "Select Region…" : "Select Region… (slurp is not installed)"
                                     onClicked: picker.selectRegion()
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    visible: picker.regionError.length > 0
-                                    color: "#a33232"
-                                    wrapMode: Text.WordWrap
-                                    text: picker.regionError
                                 }
 
                                 Item { Layout.fillHeight: true }

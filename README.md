@@ -8,15 +8,16 @@ The project follows the practical interaction model of Sam Saffron's
 `better-picker` branch: it opens on the **Window** tab, places the window list
 beside a selected-window preview, shows workspace labels and application icons,
 and keeps **Screen**, **Window**, and **Region** choices in one compact 800×500
-dialog. The restrained light palette is intentional and remains consistent
-across desktops rather than following a dark or system theme.
+centered layer-shell surface. The restrained light palette is intentional and
+remains consistent across desktops rather than following a dark or system theme.
 
 The current public release is **v0.1.2**.
 
 ## Features
 
 - Screen, window, and `slurp` region selection using XDPH's selector protocol.
-- Window-first layout with a still `ScreencopyView` preview.
+- Screen and window tabs pair their compact source lists with a selected-source
+  preview refreshed once per second while that tab is active.
 - XDPH windows matched to Quickshell Hyprland toplevels by normalized 64-bit
   Hyprland address; the original XDPH window handle is returned unchanged.
 - Current workspace first, then workspace ID, preserving source order for ties.
@@ -35,8 +36,8 @@ The current public release is **v0.1.2**.
 Runtime:
 
 - Linux with Hyprland and a compatible current `xdg-desktop-portal-hyprland`.
-- Quickshell **0.3.1 or newer**, built with Hyprland, toplevel management, and
-  screencopy support.
+- Quickshell **0.3.1 or newer**, built with Wayland layer-shell, Hyprland,
+  toplevel management, and screencopy support.
 - Python 3.10 or newer (standard library only).
 - GNU coreutils (`timeout`).
 - `slurp` for region selection. Screen and window selection still work when
@@ -58,11 +59,12 @@ xdg-desktop-portal-hyprland
   ├─ creates $XDG_RUNTIME_DIR/quickshell-share-picker.XXXXXXXX (0700)
   ├─ protocol.py parses XDPH records into private session.json (0600)
   ├─ starts a bounded, one-shot qs config with stdout/stderr redirected
-  │    └─ PickerWindow.qml
-  │         ├─ Quickshell.Hyprland: address/workspace/toplevel association
-  │         ├─ ScreencopyView: selected toplevel still preview
-  │         ├─ Quickshell.screens: output names and geometry
-  │         └─ slurp Process: output-relative region geometry
+  │    └─ centered PickerPanelWindow layer-shell surface
+  │         └─ PickerWindow.qml
+  │              ├─ Quickshell.Hyprland: address/workspace/toplevel association
+  │              ├─ ScreencopyView: selected toplevel still preview
+  │              └─ Quickshell.screens: output names and geometry
+  ├─ launches slurp only after the layer-shell picker has fully exited
   ├─ validates the private result file
   └─ writes exactly one [SELECTION]… line, or nothing on cancellation
 ```
@@ -213,6 +215,7 @@ make lint            # sh -n; shellcheck/qmllint when installed; QML warnings fa
 make test            # headless Python unit tests
 make smoke           # real QML on Qt's offscreen platform
 make check           # formatting + lint + unit tests + runtime smoke
+./bin/quickshell-share-picker --test-live # current Hyprland windows and real previews
 ./scripts/run-mock   # launch the real QML UI with fixture data
 make dist            # deterministic release archive in dist/
 ```
@@ -223,6 +226,13 @@ Require optional tools explicitly in automation with `REQUIRE_SHELLCHECK=1`,
 The mock launcher still needs `qs` and a Qt platform on which to display the
 window, but it does not query Hyprland or require the XDPH environment. Window
 previews intentionally show as unavailable in mock mode.
+
+For local testing on a running Hyprland session, `--test-live` skips XDPH input,
+builds the window list from Quickshell's current Hyprland toplevels, and uses
+their associated Wayland handles for real still previews. Window selections in
+this mode print a synthetic numeric handle for diagnostics only; that output is
+not a valid handle to feed back into XDPH. Screen and region interactions use
+the current desktop in the same way as a portal-launched picker.
 
 Runtime cleanup is intentionally scoped: the wrapper removes only the private
 picker directory it creates and any files inside it. Quickshell owns its global

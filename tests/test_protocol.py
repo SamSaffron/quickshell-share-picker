@@ -63,6 +63,25 @@ class WindowListTests(unittest.TestCase):
         )
 
 
+class RegionTests(unittest.TestCase):
+    REQUEST = {
+        "allowRestore": True,
+        "screens": [
+            {"height": 1080, "name": "HDMI-A-1", "width": 1920, "x": -1920, "y": 180}
+        ],
+    }
+
+    def test_resolve_region_makes_coordinates_output_relative(self) -> None:
+        self.assertEqual(
+            protocol.resolve_region(self.REQUEST, "HDMI-A-1 -1900 200 300 400\n"),
+            "[SELECTION]r/region:HDMI-A-1@20,20,300,400\n",
+        )
+
+    def test_resolve_region_rejects_selection_outside_output(self) -> None:
+        with self.assertRaises(protocol.ProtocolError):
+            protocol.resolve_region(self.REQUEST, "HDMI-A-1 -1930 200 300 400\n")
+
+
 class SelectionTests(unittest.TestCase):
     def test_protocol_line_fixtures(self) -> None:
         cases = json.loads(
