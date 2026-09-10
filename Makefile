@@ -73,6 +73,11 @@ install:
 	install -Dm644 CHANGELOG.md "$(DOCDIR)/CHANGELOG.md"
 	install -Dm644 LICENSE "$(DOCDIR)/LICENSE"
 	install -Dm644 NOTICE "$(DOCDIR)/NOTICE"
+	install -Dm644 CONTRIBUTING.md "$(DOCDIR)/CONTRIBUTING.md"
+	install -Dm644 SECURITY.md "$(DOCDIR)/SECURITY.md"
+	@for file in docs/*.md docs/assets/*; do \
+		install -Dm644 "$$file" "$(DOCDIR)/$$file" || exit $$?; \
+	done
 
 uninstall:
 	rm -f "$(BINDIR)/quickshell-share-picker" "$(BINDIR)/quickshell-share-picker-setup"
