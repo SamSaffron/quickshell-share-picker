@@ -6,8 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Documentation
+
+- Shorten the README, add a real stock-picker / Quickshell before-and-after
+  comparison and a sharing-scope diagram, and move detailed setup and protocol
+  reference into linked guides. Ship the guides and visuals with source archives
+  and installed documentation.
+
 ### Fixed
 
+- The Git-only AUR publishing test no longer requires Arch's `makepkg` on
+  non-Arch test runners; production publication still checks that dependency.
 - The release workflow now includes `make aur`, which safely verifies and copies
   finalized metadata into a local AUR clone, commits it, and pushes AUR's master
   branch instead of stopping after updating this repository.

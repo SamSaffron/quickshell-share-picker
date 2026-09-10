@@ -30,6 +30,7 @@ rm -f "$output"
             .github \
             aur \
             bin \
+            docs \
             scripts \
             src \
             tests \

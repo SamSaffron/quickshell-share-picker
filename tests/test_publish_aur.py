@@ -94,6 +94,19 @@ class AurPublisherTests(unittest.TestCase):
             )
             self.assertEqual("keep\n", (destination / "README").read_text(encoding="utf-8"))
 
+    def test_publish_requires_makepkg_before_any_work(self) -> None:
+        with (
+            mock.patch.object(
+                publish_aur.shutil,
+                "which",
+                side_effect=lambda command: None if command == "makepkg" else "/usr/bin/git",
+            ),
+            mock.patch.object(publish_aur, "validate_metadata") as validate_metadata,
+        ):
+            with self.assertRaisesRegex(publish_aur.AurError, "missing required commands: makepkg"):
+                publish_aur.publish(Path("unused"), assume_yes=True)
+            validate_metadata.assert_not_called()
+
     def test_publishes_initial_and_idempotent_updates_to_git(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -117,6 +130,9 @@ class AurPublisherTests(unittest.TestCase):
 
             with (
                 mock.patch.object(publish_aur, "ROOT", source),
+                # Package verification is mocked below; its makepkg prerequisite
+                # must not leak into this real-Git integration test on non-Arch hosts.
+                mock.patch.object(publish_aur, "require_commands") as require_commands,
                 mock.patch.object(publish_aur, "validate_remote_url"),
                 mock.patch.object(publish_aur, "verify_package_sources"),
                 mock.patch.object(publish_aur, "ensure_source_metadata_committed"),
@@ -125,6 +141,10 @@ class AurPublisherTests(unittest.TestCase):
                 publish_aur.publish(repository, assume_yes=True)
                 publish_aur.publish(repository, assume_yes=True)
                 self.assertEqual(2, confirmation.call_count)
+                self.assertEqual(
+                    [mock.call("git", "makepkg"), mock.call("git", "makepkg")],
+                    require_commands.call_args_list,
+                )
 
             remote_files = subprocess.run(
                 ["git", "--git-dir", str(remote), "ls-tree", "--name-only", "master"],
