@@ -120,7 +120,9 @@ The existing config backup and unrelated settings are preserved. The helper's
 `check` reports setup needed while the effective setting is still true. Until
 you update that older configuration, XDPH can continue passing `--allow-token`.
 Previously, merely defining `XDPH_PICKER_ALLOW_TOKEN_SELECTION` showed the choice;
-it now requires `=1`. No user configuration is changed by a root package install.
+it now requires `=1`. Remove an existing `XDPH_PICKER_ALLOW_TOKEN_SELECTION=1`
+service setting if you want the default checkbox-free dialog again. No user
+configuration is changed by a root package install.
 
 After changing the configuration manually, restart the portal (this interrupts
 active portal sessions):
