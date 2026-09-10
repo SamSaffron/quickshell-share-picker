@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Restore tokens are now opt-in: the default picker hides the checkbox and emits
+  no `r` flag for screen, window, region or repeated-region selections. Set
+  `XDPH_PICKER_ALLOW_TOKEN_SELECTION=1` to offer an unchecked choice; empty and
+  `0` no longer enable it. Explicit `--allow-token` remains supported.
+- Setup now writes `allow_token_by_default = false`. Existing users should rerun
+  `quickshell-share-picker-setup install` to migrate the old managed default.
+- Refresh the README comparison with actual default-off UI captures.
+
 ### Documentation
 
 - Shorten the README, add a real stock-picker / Quickshell before-and-after

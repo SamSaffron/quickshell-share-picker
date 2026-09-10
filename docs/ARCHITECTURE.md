@@ -52,5 +52,6 @@ The accepted output grammar is deliberately narrow:
 [SELECTION][r]/region:OUTPUT@X,Y,WIDTH,HEIGHT
 ```
 
-`r` means the application may receive a restore token. Cancellation and invalid
-results produce no stdout selection.
+`r` means the application may receive a restore token. It is absent by default;
+only an explicit `--allow-token` argument or a checked, opt-in restore-token
+choice enables it. Cancellation and invalid results produce no stdout selection.

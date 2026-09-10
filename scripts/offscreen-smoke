@@ -44,6 +44,18 @@ XDPH_WINDOW_SHARING_LIST='17[HC>]app[HT>]Title[HE>]255[HA>]' \
 "$python_bin" "$root/src/lib/protocol.py" prepare \
     --output "$live_session_file" --fixture "$root/src/fixtures/mock-session.json"
 
+"$python_bin" - "$live_session_file" <<'PYREGION'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+session = json.loads(path.read_text())
+session["lastRegion"] = {
+    "version": 1, "output": "DP-1", "outputWidth": 2560, "outputHeight": 1440,
+    "x": 10, "y": 20, "width": 30, "height": 40,
+}
+path.write_text(json.dumps(session) + "\n")
+PYREGION
+
 run_case() {
     name=$1
     token_selection=$2
@@ -53,7 +65,12 @@ run_case() {
     case_session=${6:-$session_file}
     smoke_region=${7:-0}
     theme=${8:-light}
-    if [ "$smoke_region" = 1 ]; then
+    allow_token=${9:-0}
+    check_token=${10:-0}
+    action=${11:-default}
+    if [ "$action" = screen ]; then
+        default_tab=screen
+    elif [ "$smoke_region" = 1 ]; then
         default_tab=region
     else
         default_tab=window
@@ -72,7 +89,7 @@ run_case() {
         QT_QUICK_BACKEND=software \
         QS_DISABLE_FILE_WATCHER=1 \
         QS_NO_RELOAD_POPUP=1 \
-        QSP_ALLOW_TOKEN=1 \
+        QSP_ALLOW_TOKEN="$allow_token" \
         QSP_ALLOW_TOKEN_SELECTION="$token_selection" \
         QSP_GEOMETRY_FILE="$geometry_file" \
         QSP_LIVE_TEST_MODE="$live_test" \
@@ -86,6 +103,8 @@ run_case() {
         QSP_SMOKE_MODE=1 \
         QSP_SMOKE_REGION="$smoke_region" \
         QSP_SMOKE_UNCHECK_TOKEN="$uncheck" \
+        QSP_SMOKE_CHECK_TOKEN="$check_token" \
+        QSP_SMOKE_ACTION="$action" \
         QSP_TEST_MODE=0 \
         QSP_THEME="$theme" \
         XDPH_PICKER_DEFAULT_TAB="$default_tab" \
@@ -100,7 +119,10 @@ run_case() {
         return 1
     fi
 
-    if [ "$smoke_region" = 1 ]; then
+    if [ "$action" = repeat ]; then
+        "$python_bin" "$root/src/lib/protocol.py" repeat-region \
+            --request "$repeat_region_request_file" >"$result_file"
+    elif [ "$smoke_region" = 1 ]; then
         "$fake_slurp" >"$slurp_output_file"
         "$python_bin" "$root/src/lib/protocol.py" region \
             --request "$region_request_file" --selection "$slurp_output_file" >"$result_file"
@@ -116,12 +138,23 @@ run_case() {
         tail -n 40 "$log_file" >&2 || true
         return 1
     fi
+    printf 'PASS QML %s\n' "$name"
 }
 
-run_case hidden 0 0 '[SELECTION]r/window:17'
-run_case shown-checked 1 0 '[SELECTION]r/window:17'
-run_case shown-unchecked 1 1 '[SELECTION]/window:17'
-run_case live-test 0 0 '[SELECTION]r/window:1' 1 "$live_session_file"
-run_case dark 0 0 '[SELECTION]r/window:17' 0 "$session_file" 0 dark
-run_case region 0 0 '[SELECTION]r/region:DP-1@10,20,30,40' 0 "$live_session_file" 1
+# Visibility and consent are separate: showing the checkbox is not consent.
+run_case hidden-default 0 0 '[SELECTION]/window:17'
+run_case hidden-explicit 0 0 '[SELECTION]r/window:17' 0 "$session_file" 0 light 1
+run_case shown-default 1 0 '[SELECTION]/window:17'
+run_case shown-opt-in 1 0 '[SELECTION]r/window:17' 0 "$session_file" 0 light 0 1
+run_case shown-explicit-unchecked 1 1 '[SELECTION]/window:17' 0 "$session_file" 0 light 1
+run_case live-test 0 0 '[SELECTION]/window:1' 1 "$live_session_file"
+run_case dark 0 0 '[SELECTION]/window:17' 0 "$session_file" 0 dark
+run_case screen-default 0 0 '[SELECTION]/screen:DP-1' 1 "$live_session_file" 0 light 0 0 screen
+run_case screen-opt-in 1 0 '[SELECTION]r/screen:DP-1' 1 "$live_session_file" 0 light 0 1 screen
+run_case region-default 0 0 '[SELECTION]/region:DP-1@10,20,30,40' 0 "$live_session_file" 1
+run_case region-explicit 0 0 '[SELECTION]r/region:DP-1@10,20,30,40' 0 "$live_session_file" 1 light 1
+run_case region-opt-in 1 0 '[SELECTION]r/region:DP-1@10,20,30,40' 0 "$live_session_file" 1 light 0 1
+run_case repeat-default 0 0 '[SELECTION]/region:DP-1@10,20,30,40' 0 "$live_session_file" 1 light 0 0 repeat
+run_case repeat-explicit 0 0 '[SELECTION]r/region:DP-1@10,20,30,40' 0 "$live_session_file" 1 light 1 0 repeat
+run_case repeat-opt-in 1 0 '[SELECTION]r/region:DP-1@10,20,30,40' 0 "$live_session_file" 1 light 0 1 repeat
 printf 'PASS real QML offscreen smoke\n'

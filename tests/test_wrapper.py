@@ -68,25 +68,36 @@ class WrapperTests(unittest.TestCase):
         self.assertEqual(result.stdout, "[SELECTION]/window:17\n")
         self.assertNotIn("fake qs", result.stdout)
 
-    def test_allow_token_defaults_on_and_argument_remains_compatible(self) -> None:
+    def test_allow_token_requires_explicit_argument(self) -> None:
         without_argument = self.run_picker(mode="allow-token")
         with_argument = self.run_picker("--allow-token", mode="allow-token")
-        self.assertEqual(without_argument.stdout, "[SELECTION]r/window:17\n")
+        self.assertEqual(without_argument.stdout, "[SELECTION]/window:17\n")
         self.assertEqual(with_argument.stdout, "[SELECTION]r/window:17\n")
 
-    def test_token_selection_environment_presence_reaches_picker(self) -> None:
-        environment = self.picker_environment("token-visibility")
-        environment["XDPH_PICKER_ALLOW_TOKEN_SELECTION"] = ""
+    def test_token_checkbox_requires_explicit_environment_opt_in(self) -> None:
+        for value in (None, "", "0", "false", "true", "1"):
+            with self.subTest(value=value):
+                environment = self.picker_environment("token-visibility")
+                if value is not None:
+                    environment["XDPH_PICKER_ALLOW_TOKEN_SELECTION"] = value
+                result = subprocess.run(
+                    [str(WRAPPER)], check=False, capture_output=True,
+                    env=environment, text=True, timeout=10,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                handle = "18" if value == "1" else "17"
+                self.assertEqual(result.stdout, f"[SELECTION]/window:{handle}\n")
+
+    def test_showing_checkbox_does_not_enable_tokens(self) -> None:
+        environment = self.picker_environment("allow-token")
+        environment["XDPH_PICKER_ALLOW_TOKEN_SELECTION"] = "1"
+        environment["QSP_ALLOW_TOKEN"] = "1"  # Internal state cannot override CLI defaults.
         result = subprocess.run(
-            [str(WRAPPER)],
-            check=False,
-            capture_output=True,
-            env=environment,
-            text=True,
-            timeout=10,
+            [str(WRAPPER)], check=False, capture_output=True,
+            env=environment, text=True, timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "[SELECTION]r/window:18\n")
+        self.assertEqual(result.stdout, "[SELECTION]/window:17\n")
 
     def test_cancel_has_empty_stdout(self) -> None:
         result = self.run_picker(mode="cancel")
@@ -118,7 +129,7 @@ class WrapperTests(unittest.TestCase):
         self.assertEqual(result.stdout, "[SELECTION]/window:17\n")
 
     def test_region_request_runs_slurp_after_picker_and_resolves_coordinates(self) -> None:
-        result = self.run_picker(mode="region-request")
+        result = self.run_picker("--allow-token", mode="region-request")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "[SELECTION]r/region:DP-1@10,20,30,40\n")
         state = json.loads((self.state / "last-region.json").read_text(encoding="utf-8"))
@@ -138,7 +149,7 @@ class WrapperTests(unittest.TestCase):
         self.assertEqual((self.state / "last-region.json").stat().st_mode & 0o777, 0o600)
 
     def test_repeat_last_region_skips_slurp_and_uses_current_token_choice(self) -> None:
-        first = self.run_picker(mode="region-request")
+        first = self.run_picker("--allow-token", mode="region-request")
         self.assertEqual(first.returncode, 0, first.stderr)
         repeated = self.run_picker(mode="repeat-region")
         self.assertEqual(repeated.returncode, 0, repeated.stderr)
@@ -175,8 +186,9 @@ class WrapperTests(unittest.TestCase):
     def test_region_recovery_preserves_unchecked_restore_token(self) -> None:
         environment = self.picker_environment("region-recovery-token")
         environment["QSP_FAKE_SLURP_MODE"] = "cancel"
+        environment["XDPH_PICKER_ALLOW_TOKEN_SELECTION"] = "1"
         result = subprocess.run(
-            [str(WRAPPER)],
+            [str(WRAPPER), "--allow-token"],
             check=False,
             capture_output=True,
             env=environment,
@@ -185,6 +197,17 @@ class WrapperTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "[SELECTION]/window:17\n")
+
+    def test_region_recovery_preserves_checked_restore_token(self) -> None:
+        environment = self.picker_environment("region-recovery-checked")
+        environment["QSP_FAKE_SLURP_MODE"] = "cancel"
+        environment["XDPH_PICKER_ALLOW_TOKEN_SELECTION"] = "1"
+        result = subprocess.run(
+            [str(WRAPPER)], check=False, capture_output=True,
+            env=environment, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "[SELECTION]r/window:17\n")
 
     def test_live_test_uses_runtime_toplevel_mode_without_portal_windows(self) -> None:
         result = self.run_picker("--test-live", mode="live-test")

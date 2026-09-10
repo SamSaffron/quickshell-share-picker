@@ -397,7 +397,7 @@ Item {
             return;
         finalized = true;
         saveGeometry();
-        const allowRestore = restoreToken.visible ? restoreToken.checked : true;
+        const allowRestore = restoreToken.checked;
         const flags = allowRestore ? "r" : "";
         resultFile.setText("[SELECTION]" + flags + "/" + selection + "\n");
         Qt.quit();
@@ -454,7 +454,7 @@ Item {
             return;
         finalized = true;
         saveGeometry();
-        const allowRestore = restoreToken.visible ? restoreToken.checked : true;
+        const allowRestore = restoreToken.checked;
         regionRequestFile.setText(JSON.stringify({
             "allowRestore": allowRestore,
             "screens": regionScreens()
@@ -467,7 +467,7 @@ Item {
             return;
         finalized = true;
         saveGeometry();
-        const allowRestore = restoreToken.visible ? restoreToken.checked : true;
+        const allowRestore = restoreToken.checked;
         repeatRegionRequestFile.setText(JSON.stringify({
             "allowRestore": allowRestore,
             "region": session.lastRegion,
@@ -488,7 +488,8 @@ Item {
         const smokeRegion = Quickshell.env("QSP_SMOKE_REGION") === "1";
         if (Quickshell.appId !== "io.github.samsaffron.quickshell-share-picker")
             throw new Error("unexpected Quickshell app ID: " + Quickshell.appId);
-        if (tabs.currentIndex !== (smokeRegion ? 2 : 1))
+        const smokeAction = Quickshell.env("QSP_SMOKE_ACTION");
+        if (tabs.currentIndex !== (smokeAction === "screen" ? 0 : smokeRegion ? 2 : 1))
             throw new Error("picker did not open on the requested tab");
         if (regionRecovery !== smokeRegion)
             throw new Error("region recovery state did not follow the environment");
@@ -538,11 +539,22 @@ Item {
         }
         if (restoreToken.visible !== allowTokenSelection)
             throw new Error("restore-token visibility did not follow the environment");
-        if (restoreToken.visible && !restoreToken.checked)
-            throw new Error("visible restore-token checkbox did not start checked");
+        if (restoreToken.checked !== (Quickshell.env("QSP_ALLOW_TOKEN") === "1"))
+            throw new Error("restore-token default did not follow explicit opt-in");
+        if (Quickshell.env("QSP_SMOKE_CHECK_TOKEN") === "1") {
+            if (!restoreToken.visible)
+                throw new Error("cannot opt in through a hidden checkbox");
+            restoreToken.checked = true;
+        }
         if (Quickshell.env("QSP_SMOKE_UNCHECK_TOKEN") === "1")
             restoreToken.checked = false;
-        shareCurrent();
+        if (smokeAction === "repeat") {
+            if (!lastRegionAvailable())
+                throw new Error("smoke saved region is unavailable");
+            repeatLastRegion();
+        } else {
+            shareCurrent();
+        }
     }
 
     Component.onCompleted: {
@@ -551,7 +563,7 @@ Item {
         const requestedTab = regionRecovery ? "region"
             : String(Quickshell.env("XDPH_PICKER_DEFAULT_TAB") || "window").toLowerCase();
         tabs.currentIndex = requestedTab === "screen" ? 0 : requestedTab === "region" ? 2 : 1;
-        restoreToken.checked = Quickshell.env("QSP_ALLOW_TOKEN") !== "0";
+        restoreToken.checked = Quickshell.env("QSP_ALLOW_TOKEN") === "1";
         if (smokeMode) {
             windowModelReady = true;
             rebuildWindows();

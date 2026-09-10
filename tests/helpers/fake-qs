@@ -20,9 +20,9 @@ case ${QSP_FAKE_MODE:-success} in
         ;;
     token-visibility)
         if [ "${QSP_ALLOW_TOKEN_SELECTION:-0}" = 1 ]; then
-            printf '%s\n' '[SELECTION]r/window:18' >"$QSP_RESULT_FILE"
+            printf '%s\n' '[SELECTION]/window:18' >"$QSP_RESULT_FILE"
         else
-            printf '%s\n' '[SELECTION]r/window:17' >"$QSP_RESULT_FILE"
+            printf '%s\n' '[SELECTION]/window:17' >"$QSP_RESULT_FILE"
         fi
         ;;
     live-test)
@@ -46,15 +46,19 @@ case ${QSP_FAKE_MODE:-success} in
             printf '%s\n' '{"allowRestore":true,"screens":[{"height":1440,"name":"DP-1","width":2560,"x":0,"y":0}]}' >"$QSP_REGION_REQUEST_FILE"
         fi
         ;;
-    region-recovery-token)
+    region-recovery-token | region-recovery-checked)
         if [ "${QSP_REGION_RECOVERY:-0}" = 1 ]; then
-            if [ "${QSP_ALLOW_TOKEN:-1}" = 0 ]; then
+            if [ "${QSP_ALLOW_TOKEN:-0}" = 0 ]; then
                 printf '%s\n' '[SELECTION]/window:17' >"$QSP_RESULT_FILE"
             else
                 printf '%s\n' '[SELECTION]r/window:17' >"$QSP_RESULT_FILE"
             fi
         else
-            printf '%s\n' '{"allowRestore":false,"screens":[{"height":1440,"name":"DP-1","width":2560,"x":0,"y":0}]}' >"$QSP_REGION_REQUEST_FILE"
+            allow_restore=false
+            if [ "${QSP_FAKE_MODE:-}" = region-recovery-checked ]; then
+                allow_restore=true
+            fi
+            printf '{"allowRestore":%s,"screens":[{"height":1440,"name":"DP-1","width":2560,"x":0,"y":0}]}\n' "$allow_restore" >"$QSP_REGION_REQUEST_FILE"
         fi
         ;;
     repeat-region)
