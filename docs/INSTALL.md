@@ -84,45 +84,28 @@ For manual configuration, add this equivalent block to `~/.config/hypr/xdph.conf
 ```ini
 screencopy {
     custom_picker_binary = /usr/bin/quickshell-share-picker
-    allow_token_by_default = false
+    allow_token_by_default = true
 }
 ```
 
-### Optional restore-token support
+### Advanced restore-token opt-out
 
-Most users can leave this off. By default there is **no restore-token checkbox**,
-and screen, window, region and repeated-region selections do **not** include
-XDPH's `r` flag. This does not remove the normal source selection or sharing flow.
+Restore tokens stay **enabled by default**, so applications can restore a previous
+sharing choice. Normal users do not need to manage this: the checkbox is hidden,
+and successful screen, window, region and repeated-region selections include
+XDPH's `r` flag. Setup continues to write `allow_token_by_default = true`.
 
-To expose an optional, **initially unchecked** checkbox, set
-`XDPH_PICKER_ALLOW_TOKEN_SELECTION=1` in the **portal service environment**, then
-restart the portal when it is safe to interrupt active sharing. Only the literal
-value `1` enables the checkbox; unset, empty and `0` all leave it hidden. Showing
-the checkbox is not consent: the user must check it to allow a restore token.
-The choice survives a cancelled region-selection attempt, but is not saved as a
-preference for later picker invocations.
+If you want to opt out, set `XDPH_PICKER_ALLOW_TOKEN_SELECTION=1` in the **portal
+service environment** to expose the advanced checkbox. It starts **checked**;
+uncheck it before sharing to omit the restore token for that selection. The
+choice survives cancellation/retry of region selection but is not saved as a
+default for future picker invocations.
 
-Advanced callers may explicitly pass `--allow-token` to allow a token without
-showing the checkbox. If combined with the opt-in checkbox, it starts checked
-and can be unchecked. XDPH supplies that argument when its
-`allow_token_by_default` setting is true; the managed setup now writes **false**.
-This preserves the stock selector interface without silently enabling tokens.
-
-**Upgrading an existing installation:** rerun the setup helper as your desktop
-user to replace the old managed `allow_token_by_default = true` setting:
-
-```sh
-quickshell-share-picker-setup install
-quickshell-share-picker-setup check
-```
-
-The existing config backup and unrelated settings are preserved. The helper's
-`check` reports setup needed while the effective setting is still true. Until
-you update that older configuration, XDPH can continue passing `--allow-token`.
-Previously, merely defining `XDPH_PICKER_ALLOW_TOKEN_SELECTION` showed the choice;
-it now requires `=1`. Remove an existing `XDPH_PICKER_ALLOW_TOKEN_SELECTION=1`
-service setting if you want the default checkbox-free dialog again. No user
-configuration is changed by a root package install.
+Only the literal value `1` exposes the control. Unset, empty, `0` and other values
+hide it **without disabling restore tokens**. Remove an existing `=1` service
+setting if you want the normal checkbox-free dialog again. `--allow-token`
+remains accepted for stock XDPH compatibility and is redundant with the enabled
+default. There is no migration to a default-off portal configuration.
 
 After changing the configuration manually, restart the portal (this interrupts
 active portal sessions):
@@ -137,7 +120,7 @@ line directly.
 
 ### Optional environment settings
 
-- `XDPH_PICKER_ALLOW_TOKEN_SELECTION=1` (opt in to the unchecked restore-token choice; hidden by default)
+- `XDPH_PICKER_ALLOW_TOKEN_SELECTION=1` (expose the checked advanced opt-out control; tokens remain enabled when hidden)
 - `XDPH_PICKER_DEFAULT_TAB=screen|window|region` (default: `window`)
 - `QSP_TIMEOUT_SECONDS=5..600` (default: `120`)
 - `QSP_THEME=light|dark` (default: `light`)

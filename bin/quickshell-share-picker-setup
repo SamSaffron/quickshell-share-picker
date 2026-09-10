@@ -45,7 +45,7 @@ def render_block(picker: str = DEFAULT_PICKER, newline: str = "\n") -> str:
         BEGIN_MARKER,
         "screencopy {",
         f"    custom_picker_binary = {picker}",
-        "    allow_token_by_default = false",
+        "    allow_token_by_default = true",
         "}",
         END_MARKER,
     ]
@@ -260,8 +260,8 @@ def check_configuration(path: Path, picker: str) -> int:
     selected = effective_picker(text)
     if selected != picker:
         issues.append(f"effective custom picker is {selected or 'not configured'}")
-    if effective_allow_token(text) is not False:
-        issues.append("effective allow_token_by_default is not false")
+    if effective_allow_token(text) is not True:
+        issues.append("effective allow_token_by_default is not true")
     picker_path = Path(picker)
     if not picker_path.is_file() or not os.access(picker_path, os.X_OK):
         issues.append(f"picker binary is missing or not executable: {picker}")

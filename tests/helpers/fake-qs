@@ -20,9 +20,9 @@ case ${QSP_FAKE_MODE:-success} in
         ;;
     token-visibility)
         if [ "${QSP_ALLOW_TOKEN_SELECTION:-0}" = 1 ]; then
-            printf '%s\n' '[SELECTION]/window:18' >"$QSP_RESULT_FILE"
+            printf '%s\n' '[SELECTION]r/window:18' >"$QSP_RESULT_FILE"
         else
-            printf '%s\n' '[SELECTION]/window:17' >"$QSP_RESULT_FILE"
+            printf '%s\n' '[SELECTION]r/window:17' >"$QSP_RESULT_FILE"
         fi
         ;;
     live-test)

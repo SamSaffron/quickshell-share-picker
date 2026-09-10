@@ -69,24 +69,14 @@ class SetupContentTests(unittest.TestCase):
             setup.render_block()
             + "screencopy {\n"
             + "    custom_picker_binary = /tmp/foreign\n"
-            + "    allow_token_by_default = true\n"
+            + "    allow_token_by_default = false\n"
             + "}\n"
         )
-        self.assertTrue(setup.effective_allow_token(text))
+        self.assertFalse(setup.effective_allow_token(text))
         updated = setup.install_content(text)
         self.assertEqual(setup.DEFAULT_PICKER, setup.effective_picker(updated))
-        self.assertFalse(setup.effective_allow_token(updated))
+        self.assertTrue(setup.effective_allow_token(updated))
         self.assertTrue(updated.endswith(setup.render_block()))
-
-    def test_upgrade_replaces_legacy_default_on_managed_block(self) -> None:
-        legacy = setup.render_block().replace(
-            "allow_token_by_default = false", "allow_token_by_default = true"
-        )
-        original = "# unrelated settings\n" + legacy
-        updated = setup.install_content(original)
-        self.assertFalse(setup.effective_allow_token(updated))
-        self.assertTrue(updated.startswith("# unrelated settings\n"))
-        self.assertEqual(updated, setup.install_content(updated))
 
     def test_finds_picker_assignments_and_ignores_comments(self) -> None:
         text = (
@@ -189,7 +179,7 @@ class SetupFilesystemTests(unittest.TestCase):
             self.assertEqual(0, setup.check_configuration(self.config, str(self.picker)))
         self.config.write_text(
             setup.render_block(str(self.picker))
-            + "screencopy {\n    allow_token_by_default = true\n}\n",
+            + "screencopy {\n    allow_token_by_default = false\n}\n",
             encoding="utf-8",
         )
         with contextlib.redirect_stdout(io.StringIO()):

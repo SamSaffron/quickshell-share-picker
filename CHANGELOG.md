@@ -8,13 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- Restore tokens are now opt-in: the default picker hides the checkbox and emits
-  no `r` flag for screen, window, region or repeated-region selections. Set
-  `XDPH_PICKER_ALLOW_TOKEN_SELECTION=1` to offer an unchecked choice; empty and
-  `0` no longer enable it. Explicit `--allow-token` remains supported.
-- Setup now writes `allow_token_by_default = false`. Existing users should rerun
-  `quickshell-share-picker-setup install` to migrate the old managed default.
-- Refresh the README comparison with actual default-off UI captures.
+- Keep restore tokens enabled by default while hiding their advanced UI. Set
+  `XDPH_PICKER_ALLOW_TOKEN_SELECTION=1` to expose a checked opt-out control;
+  empty and `0` no longer expose it, and hiding it does not disable tokens.
+- Preserve explicit opt-out state across all selection and region-retry paths,
+  and refresh README screenshots using the clean default UI.
 
 ### Documentation
 

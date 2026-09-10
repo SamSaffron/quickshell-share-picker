@@ -12,7 +12,7 @@ Usage: quickshell-share-picker [--allow-token] [--test | --test-live]
 
 One-shot screencast source picker for xdg-desktop-portal-hyprland.
 
-  --allow-token  Explicitly allow a restore token (off by default).
+  --allow-token  Accepted for XDPH compatibility (restore tokens default on).
   --test         Use the bundled mock session (no Hyprland data required).
   --test-live    Use current Hyprland windows for local UI testing and previews.
   -h, --help     Show this help.
@@ -24,7 +24,7 @@ fail() {
     exit 1
 }
 
-allow_token=0
+allow_token=1
 test_mode=0
 live_test_mode=0
 while [ "$#" -gt 0 ]; do

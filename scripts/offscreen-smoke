@@ -65,7 +65,7 @@ run_case() {
     case_session=${6:-$session_file}
     smoke_region=${7:-0}
     theme=${8:-light}
-    allow_token=${9:-0}
+    allow_token=${9:-1}
     check_token=${10:-0}
     action=${11:-default}
     if [ "$action" = screen ]; then
@@ -141,20 +141,20 @@ run_case() {
     printf 'PASS QML %s\n' "$name"
 }
 
-# Visibility and consent are separate: showing the checkbox is not consent.
-run_case hidden-default 0 0 '[SELECTION]/window:17'
-run_case hidden-explicit 0 0 '[SELECTION]r/window:17' 0 "$session_file" 0 light 1
-run_case shown-default 1 0 '[SELECTION]/window:17'
-run_case shown-opt-in 1 0 '[SELECTION]r/window:17' 0 "$session_file" 0 light 0 1
-run_case shown-explicit-unchecked 1 1 '[SELECTION]/window:17' 0 "$session_file" 0 light 1
-run_case live-test 0 0 '[SELECTION]/window:1' 1 "$live_session_file"
-run_case dark 0 0 '[SELECTION]/window:17' 0 "$session_file" 0 dark
-run_case screen-default 0 0 '[SELECTION]/screen:DP-1' 1 "$live_session_file" 0 light 0 0 screen
-run_case screen-opt-in 1 0 '[SELECTION]r/screen:DP-1' 1 "$live_session_file" 0 light 0 1 screen
-run_case region-default 0 0 '[SELECTION]/region:DP-1@10,20,30,40' 0 "$live_session_file" 1
-run_case region-explicit 0 0 '[SELECTION]r/region:DP-1@10,20,30,40' 0 "$live_session_file" 1 light 1
-run_case region-opt-in 1 0 '[SELECTION]r/region:DP-1@10,20,30,40' 0 "$live_session_file" 1 light 0 1
-run_case repeat-default 0 0 '[SELECTION]/region:DP-1@10,20,30,40' 0 "$live_session_file" 1 light 0 0 repeat
-run_case repeat-explicit 0 0 '[SELECTION]r/region:DP-1@10,20,30,40' 0 "$live_session_file" 1 light 1 0 repeat
-run_case repeat-opt-in 1 0 '[SELECTION]r/region:DP-1@10,20,30,40' 0 "$live_session_file" 1 light 0 1 repeat
+# Tokens stay enabled; the advanced checkbox is hidden until explicitly exposed.
+run_case hidden-default 0 0 '[SELECTION]r/window:17'
+run_case hidden-explicit-off 0 0 '[SELECTION]/window:17' 0 "$session_file" 0 light 0
+run_case shown-default 1 0 '[SELECTION]r/window:17'
+run_case shown-opt-out 1 1 '[SELECTION]/window:17'
+run_case shown-reenabled 1 0 '[SELECTION]r/window:17' 0 "$session_file" 0 light 0 1
+run_case live-test 0 0 '[SELECTION]r/window:1' 1 "$live_session_file"
+run_case dark 0 0 '[SELECTION]r/window:17' 0 "$session_file" 0 dark
+run_case screen-default 0 0 '[SELECTION]r/screen:DP-1' 1 "$live_session_file" 0 light 1 0 screen
+run_case screen-opt-out 1 1 '[SELECTION]/screen:DP-1' 1 "$live_session_file" 0 light 1 0 screen
+run_case region-default 0 0 '[SELECTION]r/region:DP-1@10,20,30,40' 0 "$live_session_file" 1
+run_case region-opt-out 1 1 '[SELECTION]/region:DP-1@10,20,30,40' 0 "$live_session_file" 1
+run_case region-recovered-opt-out 0 0 '[SELECTION]/region:DP-1@10,20,30,40' 0 "$live_session_file" 1 light 0
+run_case repeat-default 0 0 '[SELECTION]r/region:DP-1@10,20,30,40' 0 "$live_session_file" 1 light 1 0 repeat
+run_case repeat-opt-out 1 1 '[SELECTION]/region:DP-1@10,20,30,40' 0 "$live_session_file" 1 light 1 0 repeat
+run_case repeat-recovered-opt-out 0 0 '[SELECTION]/region:DP-1@10,20,30,40' 0 "$live_session_file" 1 light 0 0 repeat
 printf 'PASS real QML offscreen smoke\n'

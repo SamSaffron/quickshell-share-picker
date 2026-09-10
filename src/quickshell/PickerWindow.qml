@@ -539,8 +539,8 @@ Item {
         }
         if (restoreToken.visible !== allowTokenSelection)
             throw new Error("restore-token visibility did not follow the environment");
-        if (restoreToken.checked !== (Quickshell.env("QSP_ALLOW_TOKEN") === "1"))
-            throw new Error("restore-token default did not follow explicit opt-in");
+        if (restoreToken.checked !== (Quickshell.env("QSP_ALLOW_TOKEN") !== "0"))
+            throw new Error("restore-token default did not preserve enabled behavior");
         if (Quickshell.env("QSP_SMOKE_CHECK_TOKEN") === "1") {
             if (!restoreToken.visible)
                 throw new Error("cannot opt in through a hidden checkbox");
@@ -563,7 +563,7 @@ Item {
         const requestedTab = regionRecovery ? "region"
             : String(Quickshell.env("XDPH_PICKER_DEFAULT_TAB") || "window").toLowerCase();
         tabs.currentIndex = requestedTab === "screen" ? 0 : requestedTab === "region" ? 2 : 1;
-        restoreToken.checked = Quickshell.env("QSP_ALLOW_TOKEN") === "1";
+        restoreToken.checked = Quickshell.env("QSP_ALLOW_TOKEN") !== "0";
         if (smokeMode) {
             windowModelReady = true;
             rebuildWindows();

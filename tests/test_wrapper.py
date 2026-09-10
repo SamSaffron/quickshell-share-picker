@@ -68,10 +68,10 @@ class WrapperTests(unittest.TestCase):
         self.assertEqual(result.stdout, "[SELECTION]/window:17\n")
         self.assertNotIn("fake qs", result.stdout)
 
-    def test_allow_token_requires_explicit_argument(self) -> None:
+    def test_allow_token_defaults_on_and_argument_remains_compatible(self) -> None:
         without_argument = self.run_picker(mode="allow-token")
         with_argument = self.run_picker("--allow-token", mode="allow-token")
-        self.assertEqual(without_argument.stdout, "[SELECTION]/window:17\n")
+        self.assertEqual(without_argument.stdout, "[SELECTION]r/window:17\n")
         self.assertEqual(with_argument.stdout, "[SELECTION]r/window:17\n")
 
     def test_token_checkbox_requires_explicit_environment_opt_in(self) -> None:
@@ -86,18 +86,18 @@ class WrapperTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 handle = "18" if value == "1" else "17"
-                self.assertEqual(result.stdout, f"[SELECTION]/window:{handle}\n")
+                self.assertEqual(result.stdout, f"[SELECTION]r/window:{handle}\n")
 
-    def test_showing_checkbox_does_not_enable_tokens(self) -> None:
+    def test_internal_environment_cannot_disable_default_tokens(self) -> None:
         environment = self.picker_environment("allow-token")
         environment["XDPH_PICKER_ALLOW_TOKEN_SELECTION"] = "1"
-        environment["QSP_ALLOW_TOKEN"] = "1"  # Internal state cannot override CLI defaults.
+        environment["QSP_ALLOW_TOKEN"] = "0"  # Internal state cannot override CLI defaults.
         result = subprocess.run(
             [str(WRAPPER)], check=False, capture_output=True,
             env=environment, text=True, timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "[SELECTION]/window:17\n")
+        self.assertEqual(result.stdout, "[SELECTION]r/window:17\n")
 
     def test_cancel_has_empty_stdout(self) -> None:
         result = self.run_picker(mode="cancel")
