@@ -12,7 +12,7 @@ Usage: quickshell-share-picker [--allow-token] [--test | --test-live]
 
 One-shot screencast source picker for xdg-desktop-portal-hyprland.
 
-  --allow-token  Accepted for XDPH compatibility (restore tokens already default on).
+  --allow-token  Accepted for XDPH compatibility (restore tokens default on).
   --test         Use the bundled mock session (no Hyprland data required).
   --test-live    Use current Hyprland windows for local UI testing and previews.
   -h, --help     Show this help.
@@ -172,7 +172,7 @@ else
     slurp_available=0
 fi
 
-if [ "${XDPH_PICKER_ALLOW_TOKEN_SELECTION+x}" = x ]; then
+if [ "${XDPH_PICKER_ALLOW_TOKEN_SELECTION:-0}" = 1 ]; then
     allow_token_selection=1
 else
     allow_token_selection=0

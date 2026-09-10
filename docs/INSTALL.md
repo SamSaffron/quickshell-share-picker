@@ -88,19 +88,24 @@ screencopy {
 }
 ```
 
-Restore-token behavior intentionally matches the BSD `origin/better-picker`
-branch exactly. Its `allowTokenByDefault` value is `true`, so selections include
-`r` by default and the checkbox starts checked whenever it is shown.
-`XDPH_PICKER_ALLOW_TOKEN_SELECTION` controls whether the checkbox is visible:
-if the variable is absent, the checkbox is hidden and the picker emits `r`
-unconditionally; if it is present (even with an empty value), the checkbox is
-shown, starts checked, and the user's final checked state is honored.
-`--allow-token` remains accepted for stock XDPH compatibility, although it is
-redundant with this true default.
+### Advanced restore-token opt-out
 
-To expose the checkbox, add `XDPH_PICKER_ALLOW_TOKEN_SELECTION=1` to the
-xdg-desktop-portal-hyprland service environment. For example, use a systemd user
-service override appropriate to the local setup, then restart the service.
+Restore tokens stay **enabled by default**, so applications can restore a previous
+sharing choice. Normal users do not need to manage this: the checkbox is hidden,
+and successful screen, window, region and repeated-region selections include
+XDPH's `r` flag. Setup continues to write `allow_token_by_default = true`.
+
+If you want to opt out, set `XDPH_PICKER_ALLOW_TOKEN_SELECTION=1` in the **portal
+service environment** to expose the advanced checkbox. It starts **checked**;
+uncheck it before sharing to omit the restore token for that selection. The
+choice survives cancellation/retry of region selection but is not saved as a
+default for future picker invocations.
+
+Only the literal value `1` exposes the control. Unset, empty, `0` and other values
+hide it **without disabling restore tokens**. Remove an existing `=1` service
+setting if you want the normal checkbox-free dialog again. `--allow-token`
+remains accepted for stock XDPH compatibility and is redundant with the enabled
+default. There is no migration to a default-off portal configuration.
 
 After changing the configuration manually, restart the portal (this interrupts
 active portal sessions):
@@ -115,7 +120,7 @@ line directly.
 
 ### Optional environment settings
 
-- `XDPH_PICKER_ALLOW_TOKEN_SELECTION` (presence shows the restore-token choice)
+- `XDPH_PICKER_ALLOW_TOKEN_SELECTION=1` (expose the checked advanced opt-out control; tokens remain enabled when hidden)
 - `XDPH_PICKER_DEFAULT_TAB=screen|window|region` (default: `window`)
 - `QSP_TIMEOUT_SECONDS=5..600` (default: `120`)
 - `QSP_THEME=light|dark` (default: `light`)

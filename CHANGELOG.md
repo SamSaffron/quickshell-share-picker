@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Keep restore tokens enabled by default while hiding their advanced UI. Set
+  `XDPH_PICKER_ALLOW_TOKEN_SELECTION=1` to expose a checked opt-out control;
+  empty and `0` no longer expose it, and hiding it does not disable tokens.
+- Preserve explicit opt-out state across all selection and region-retry paths,
+  and refresh README screenshots using the clean default UI.
+
 ### Documentation
 
 - Shorten the README, add a real stock-picker / Quickshell before-and-after

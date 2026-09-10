@@ -56,7 +56,7 @@ The v0.2.1 recipe is pinned to its published release archive and checksum. `make
 | Ctrl+1 / Ctrl+2 / Ctrl+3 | Screen / Window / Region |
 | Esc | Clear the active filter, otherwise cancel |
 
-The default palette is light. Set `QSP_THEME=dark` in the **portal service environment** for dark mode. Restore tokens are allowed by default; the optional checkbox, default tab, timeout and icon theme are covered in [configuration options](docs/INSTALL.md#optional-environment-settings).
+The default palette is light. Set `QSP_THEME=dark` in the **portal service environment** for dark mode. See [configuration options](docs/INSTALL.md#optional-environment-settings) for the default tab, timeout and icon theme.
 
 ## Go deeper
 
